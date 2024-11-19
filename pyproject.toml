@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "icenet_dashboard_preprocessor"
+version = "0.0.1"
+description = "Model part of model view controller design pattern - preprocessor of icenet-dashboard"
+readme = "README.md"
+authors = [
+  {name = "Bryn Noel Ubald", email = "bryald@bas.ac.uk"}
+]
+maintainers = [
+  {name = "Bryn Noel Ubald", email = "bryald@bas.ac.uk"}
+]
+classifiers = [
+]
+license = {text = "MIT license"}
+dependencies = [
+    "numpy",
+    "prompt_toolkit==3.0.36",
+    "ipython==8.18.0",
+    "rich[jupyter]",
+    "rioxarray",
+    "tqdm",
+    "xarray",
+]
+
+[project.optional-dependencies]
+dev = [
+    "coverage",
+    "mypy",
+    "pytest",
+    "ruff"
+]
+
+[project.scripts]
+icenet_dash_gen_cloud_tiffs = "icenet_dashboard_preprocessor.preprocess:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+"*" = ["*.*"]

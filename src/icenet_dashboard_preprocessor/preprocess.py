@@ -46,8 +46,9 @@ def get_hemisphere(netcdf_file: str) -> str:
             raise ValueError(f"Unexpected minimum latitude value: {lat_min}")
 
 
-
-def get_nc_files(location: str | PosixPath, extension="nc") -> list[PosixPath] | PosixPath:
+def get_nc_files(
+    location: str | PosixPath, extension="nc"
+) -> list[PosixPath] | PosixPath:
     """Get a list of NetCDF files located at the given `location`.
 
     Args:
@@ -76,11 +77,15 @@ def get_nc_files(location: str | PosixPath, extension="nc") -> list[PosixPath] |
         # Return file path if file is specified and matches the given extension.
         return p.resolve()
     else:
-        logger.error(f"Location {location} is invalid or does not contain a matching file with the given extension.")
+        logger.error(
+            f"Location {location} is invalid or does not contain a matching file with the given extension."
+        )
         # raise FileNotFoundError if not p.exists() else NotADirectoryError
 
 
-def generate_cloud_tiff(nc_file: str | Path, compress: bool = True, reproject: bool = True, overwrite=False) -> None:
+def generate_cloud_tiff(
+    nc_file: str | Path, compress: bool = True, reproject: bool = True, overwrite=False
+) -> None:
     """Generates Cloud Optimised GeoTIFFs from IceNet prediction netCDF files.
     Args:
         compress: Whether to compress the output GeoTIFFs.
@@ -93,20 +98,18 @@ def generate_cloud_tiff(nc_file: str | Path, compress: bool = True, reproject: b
     hemisphere = get_hemisphere(nc_file)
 
     with xr.open_dataset(nc_file) as ds:
-
         # Convert eastings and northings from kilometers to metres.
-        ds = ds.assign_coords(
-            xc=ds.coords['xc'] * 1000,
-            yc=ds.coords['yc'] * 1000
-        )
+        ds = ds.assign_coords(xc=ds.coords["xc"] * 1000, yc=ds.coords["yc"] * 1000)
 
         if reproject:
             ds = ds.drop_vars(["lat", "lon"])
 
-        ds = ds.rename({'xc': 'x', 'yc': 'y'})
+        ds = ds.rename({"xc": "x", "yc": "y"})
 
         # Rearrange array dimension to match rioxarray expectation
-        sic_variable = ds["sic_mean"].transpose("time", "leadtime", "y", "x").isel(time=0)
+        sic_variable = (
+            ds["sic_mean"].transpose("time", "leadtime", "y", "x").isel(time=0)
+        )
 
         # Get attributes from NetCDF file
         nc_attrs = ds.attrs
@@ -116,7 +119,9 @@ def generate_cloud_tiff(nc_file: str | Path, compress: bool = True, reproject: b
         sic_variable.rio.write_crs(crs, inplace=True)
 
         # Convert forecast_start_time from "2024-08-31T00:00:00" string to datetime object
-        forecast_start_time = dt.datetime.strptime(forecast_start_time_str, "%Y-%m-%dT%H:%M:%S")
+        forecast_start_time = dt.datetime.strptime(
+            forecast_start_time_str, "%Y-%m-%dT%H:%M:%S"
+        )
         forecast_start_date = forecast_start_time.date()
 
         cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_start_date}")
@@ -155,16 +160,34 @@ def generate_cloud_tiff(nc_file: str | Path, compress: bool = True, reproject: b
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description='Generate Cloud Optimized GeoTIFFs (COGs) from IceNet prediction netCDF files.')
+    parser = argparse.ArgumentParser(
+        description="Generate Cloud Optimized GeoTIFFs (COGs) from IceNet prediction netCDF files."
+    )
 
     # Optional argument: input file or filename path pattern with wildcard
-    parser.add_argument('-i', '--input', nargs='*', help='Input directory or filename path pattern with wildcard (e.g., ./results/predict/*.nc)')
+    parser.add_argument(
+        "-i",
+        "--input",
+        nargs="*",
+        help="Input directory or filename path pattern with wildcard (e.g., ./results/predict/*.nc)",
+    )
 
     # Optional boolean flag to force overwrite of existing files
-    parser.add_argument('-o', '--overwrite', action='store_true', help='Enable overwriting of existing COGs')
+    parser.add_argument(
+        "-o",
+        "--overwrite",
+        action="store_true",
+        help="Enable overwriting of existing COGs",
+    )
 
     # Optional boolean flag to disable COG compression
-    parser.add_argument('-c', '--compress', action='store_true', default=True, help='Enable COG compression (default is uncompressed)')
+    parser.add_argument(
+        "-c",
+        "--compress",
+        action="store_true",
+        default=True,
+        help="Enable COG compression (default is uncompressed)",
+    )
 
     return parser.parse_args()
 
@@ -193,7 +216,9 @@ def main():
         logger.warning(f"No input specified, search default location: {default_dir}")
         nc_files = get_nc_files("results/predict/")
     elif len(args.input) == 1:
-        nc_files = flatten_list(list(filter(None, (get_nc_files(f) for f in args.input))))
+        nc_files = flatten_list(
+            list(filter(None, (get_nc_files(f) for f in args.input)))
+        )
     else:
         nc_files = [Path(f) for f in args.input]
 

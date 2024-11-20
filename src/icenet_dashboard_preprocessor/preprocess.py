@@ -10,6 +10,11 @@ import rioxarray
 import xarray as xr
 from tqdm import tqdm
 
+import pystac
+from pystac import Catalog, Collection, Item
+from pystac.extensions.eo import EOExtension
+from pystac.extensions.projection import ProjectionExtension
+
 from .utils import flatten_list
 
 logger = logging.getLogger(__name__)
@@ -87,7 +92,7 @@ def get_nc_files(
 def generate_cloud_tiff(
     nc_file: str | Path, compress: bool = True, reproject: bool = True, overwrite=False
 ) -> None:
-    """Generates Cloud Optimised GeoTIFFs from IceNet prediction netCDF files.
+    """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
     Args:
         compress: Whether to compress the output GeoTIFFs.
                     Default is True.
@@ -96,6 +101,7 @@ def generate_cloud_tiff(
     """
     compress = "DEFLATE" if compress else "NONE"
     cogs_output_dir = Path("data") / "cogs"
+    stac_output_dir = Path("data") / "stac"
     nc_file = Path(nc_file).resolve()
     hemisphere = get_hemisphere(nc_file)
 
@@ -103,6 +109,7 @@ def generate_cloud_tiff(
         # Convert eastings and northings from kilometers to metres.
         ds = ds.assign_coords(xc=ds.coords["xc"] * 1000, yc=ds.coords["yc"] * 1000)
 
+        # Not mandatory, but found reprojecting can speed things up further down the line
         if reproject:
             ds = ds.drop_vars(["lat", "lon"])
 
@@ -129,13 +136,38 @@ def generate_cloud_tiff(
         cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_start_date}")
         cog_dir.mkdir(parents=True, exist_ok=True)
 
-        manifest_entries = []
+        # Initialize STAC Catalog
+        stac_catalog_path = stac_output_dir / "catalog.json"
+        if not stac_catalog_path.exists():
+            catalog = Catalog(
+                id="forecast-data",
+                description="Catalog of IceNet Forecast Data",
+                title="IceNet Forecast STAC Catalog",
+            )
+        else:
+            catalog = Catalog.from_file(stac_catalog_path)
 
+        # Create or retrieve a collection for this forecast date
+        collection_id = f"forecast-{forecast_start_date}"
+        collection = next(
+            (coll for coll in catalog.get_children() if coll.id == collection_id), None
+        )
+        if not collection:
+            collection = Collection(
+                id=collection_id,
+                description=f"Forecast data for {forecast_start_date}",
+                extent=pystac.Extent(
+                    pystac.SpatialExtent([[ -180, -90, 180, 90]]),
+                    pystac.TemporalExtent([[forecast_start_time, None]])
+                ),
+            )
+            catalog.add_child(collection)
+
+        # Process each leadtime
         for i in (pbar := tqdm(range(n_leadtime), desc="COGifying files", leave=True)):
-            cog_file = cog_dir / f"{nc_file.name}_day_{i}.tif"
+            cog_file = cog_dir / f"{nc_file.stem}_day_{i}.tif"
             if cog_file.exists() and not overwrite:
                 pbar.set_description(f"File already exists, skipping: {cog_file}")
-                time.sleep(0.01)
                 continue
             else:
                 pbar.set_description(f"Saving to COG: {cog_file}")
@@ -143,7 +175,6 @@ def generate_cloud_tiff(
             time_slice = sic_variable.isel(leadtime=i)
 
             # Reproject to EPSG:3857 (WGS 84 / Web Mercator)
-            # (Using leaflet's default)
             if reproject:
                 reprojected_slice = time_slice.rio.reproject("EPSG:3857")
             else:
@@ -156,16 +187,47 @@ def generate_cloud_tiff(
                 compress=compress,
             )
 
-            # Add metadata to manifest entries list
-            manifest_entries.append({
-                "nc_file": str(nc_file),
-                "forecast_start_date": str(forecast_start_date),
-                "hemisphere": hemisphere,
-                "geotiff_path": str(cog_file),
-                "leadtime": i,
-            })
+            # Add STAC Item for this file
+            item = Item(
+                id=f"{hemisphere}-leadtime-{i}",
+                geometry=None,  # Add proper geometry if available
+                bbox=[-180, -90, 180, 90],  # Use correct bounding box
+                datetime=forecast_start_time + dt.timedelta(days=i),
+                properties={
+                    "forecast_start_date": str(forecast_start_date),
+                    "hemisphere": hemisphere,
+                    "leadtime": i,
+                },
+            )
 
-    return manifest_entries
+            # Add EO and Projection extensions
+            eo_ext = EOExtension.ext(item, add_if_missing=True)
+            eo_ext.cloud_cover = None  # Add specific cloud cover if available
+
+            projection_ext = ProjectionExtension.ext(item, add_if_missing=True)
+            projection_ext.epsg = 3857
+            projection_ext.shape = reprojected_slice.shape
+            projection_ext.bbox = [-180, -90, 180, 90]
+
+            # Add COG asset
+            item.add_asset(
+                "geotiff",
+                pystac.Asset(
+                    href=str(cog_file),
+                    media_type=pystac.MediaType.COG,
+                    title=f"GeoTIFF for {hemisphere} with leadtime {i}",
+                ),
+            )
+
+            # Add item to collection
+            collection.add_item(item)
+
+        # Save catalog and collections
+        stac_output_dir.mkdir(parents=True, exist_ok=True)
+        catalog.normalize_hrefs(str(stac_output_dir))
+        catalog.save()
+
+    return
 
 
 def get_args():
@@ -243,16 +305,16 @@ def main():
         logger.warning("No netCDF files found for processing")
         raise FileNotFoundError(f"{args.input} is invalid")
 
-    manifest_entries = []
+    # manifest_entries = []
     for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):
         pbar.set_description(f"Processing {nc_file}")
         manifest = generate_cloud_tiff(nc_file, args.compress, overwrite=args.overwrite)
-        manifest_entries += manifest
+        # manifest_entries += manifest
 
-    # Write manifest.json file with metadata on all output COG files
-    manifest_file = Path("data/cogs") / "manifest.json"
-    with open(manifest_file, 'w') as f:
-        json.dump(manifest_entries, f)
+    # # Write manifest.json file with metadata on all output COG files
+    # manifest_file = Path("data/cogs") / "manifest.json"
+    # with open(manifest_file, 'w') as f:
+    #     json.dump(manifest_entries, f)
 
 
 if __name__ == "__main__":

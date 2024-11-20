@@ -1,5 +1,6 @@
 import argparse
 import datetime as dt
+import json
 import logging
 import logging.config
 import time
@@ -95,6 +96,7 @@ def generate_cloud_tiff(
     """
     compress = "DEFLATE" if compress else "NONE"
     cogs_output_dir = Path("data") / "cogs"
+    nc_file = Path(nc_file).resolve()
     hemisphere = get_hemisphere(nc_file)
 
     with xr.open_dataset(nc_file) as ds:
@@ -127,8 +129,10 @@ def generate_cloud_tiff(
         cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_start_date}")
         cog_dir.mkdir(parents=True, exist_ok=True)
 
+        manifest_entries = []
+
         for i in (pbar := tqdm(range(n_leadtime), desc="COGifying files", leave=True)):
-            cog_file = cogs_output_dir / f"north/{forecast_start_date}/leadtime_{i}.tif"
+            cog_file = cog_dir / f"{nc_file.name}_day_{i}.tif"
             if cog_file.exists() and not overwrite:
                 pbar.set_description(f"File already exists, skipping: {cog_file}")
                 time.sleep(0.01)
@@ -151,6 +155,17 @@ def generate_cloud_tiff(
                 driver="COG",
                 compress=compress,
             )
+
+            # Add metadata to manifest entries list
+            manifest_entries.append({
+                "nc_file": str(nc_file),
+                "forecast_start_date": str(forecast_start_date),
+                "hemisphere": hemisphere,
+                "geotiff_path": str(cog_file),
+                "leadtime": i,
+            })
+
+    return manifest_entries
 
 
 def get_args():
@@ -228,9 +243,16 @@ def main():
         logger.warning("No netCDF files found for processing")
         raise FileNotFoundError(f"{args.input} is invalid")
 
+    manifest_entries = []
     for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):
         pbar.set_description(f"Processing {nc_file}")
-        generate_cloud_tiff(nc_file, args.compress, overwrite=args.overwrite)
+        manifest = generate_cloud_tiff(nc_file, args.compress, overwrite=args.overwrite)
+        manifest_entries += manifest
+
+    # Write manifest.json file with metadata on all output COG files
+    manifest_file = Path("data/cogs") / "manifest.json"
+    with open(manifest_file, 'w') as f:
+        json.dump(manifest_entries, f)
 
 
 if __name__ == "__main__":

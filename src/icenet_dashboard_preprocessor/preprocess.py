@@ -138,9 +138,6 @@ def generate_cloud_tiff(
 
             time_slice = sic_variable.isel(leadtime=i)
 
-            # # Mask any invalid (NaN) values
-            # time_slice_rescaled = np.ma.masked_invalid(time_slice)
-
             # Reproject to EPSG:3857 (WGS 84 / Web Mercator)
             # (Using leaflet's default)
             if reproject:
@@ -153,9 +150,6 @@ def generate_cloud_tiff(
                 cog_file,
                 driver="COG",
                 compress=compress,
-                # tiled=True,  # Enable tiling for efficient reading
-                # blockxsize=256,  # Set block size for tiling
-                # blockysize=256,  # Same for y-direction
             )
 
 

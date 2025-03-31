@@ -19,11 +19,12 @@ license = {text = "MIT license"}
 dependencies = [
     "numpy",
     "prompt_toolkit==3.0.36",
+    "pystac",
     "ipython==8.18.0",
     "rich[jupyter]",
     "rioxarray",
     "tqdm",
-    "xarray",
+    "xarray[io]",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-icenet_dash_gen_cloud_tiffs = "icenet_dashboard_preprocessor.preprocess:main"
+icenet_dashboard_preprocessor_gen_cloud_tiffs = "icenet_dashboard_preprocessor.preprocess:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

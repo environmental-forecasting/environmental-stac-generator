@@ -222,9 +222,7 @@ class IceNetSTAC(BaseSTAC):
             },
         )
 
-        # Add EO and Projection extensions
-        eo_ext = EOExtension.ext(item, add_if_missing=True)
-
+        # Add Projection extension
         projection_ext = ProjectionExtension.ext(item, add_if_missing=True)
         projection_ext.epsg = 3857
         projection_ext.shape = shape

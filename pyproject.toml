@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "icenet_dashboard_preprocessor"
+name = "icenet_geotiff_generator"
 version = "0.0.1"
-description = "Model part of model view controller design pattern - preprocessor of icenet-dashboard"
+description = "Preprocess IceNet netCDF predictions to GeoTIFF for icenet-dashboard"
 readme = "README.md"
 authors = [
   {name = "Bryn Noel Ubald", email = "bryald@bas.ac.uk"}
@@ -36,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-icenet_dashboard_preprocessor_gen_cloud_tiffs = "icenet_dashboard_preprocessor.preprocess:main"
+icenet_geotiff_generator_gen_cloud_tiffs = "icenet_geotiff_generator.preprocess:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

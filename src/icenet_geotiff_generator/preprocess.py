@@ -28,14 +28,14 @@ def get_hemisphere(netcdf_file: str) -> str:
         netcdf_file: Path to a netCDF file.
                      It must have geospatial information in its attributes.
     Returns:
-        str: The hemisphere associated with the given netCDF file ("north" or "south").
+        The hemisphere associated with the given netCDF file ("north" or "south").
     Raises:
         ValueError: If the minimum latitude value is not within the expected range (-90 to 90).
     Examples:
-        >>> get_hemisphere("/path/to/north_atlantic_climate.nc")
+        >>> get_hemisphere("results/predict/fc.2024-11-11_north.nc")
         'north'
 
-        >>> get_hemisphere("/path/to/south_pacific_ocean.nc")
+        >>> get_hemisphere("results/predict/fc.2024-11-11_south.nc")
         'south'
     """
     with xr.open_dataset(netcdf_file) as ds:
@@ -151,7 +151,7 @@ def generate_cloud_tiff(
         cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_start_date}")
         cog_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize STAC Catalog
+        # Initialise STAC Catalog
         stac_catalog_path = stac_output_dir / "catalog.json"
         if not stac_catalog_path.exists():
             catalog = Catalog(

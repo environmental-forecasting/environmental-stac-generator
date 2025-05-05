@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "icenet_geotiff_generator"
+name = "icenet_dashboard_preprocessor"
 version = "0.0.1"
 description = "Preprocess IceNet netCDF predictions to GeoTIFF for icenet-dashboard"
 readme = "README.md"
@@ -36,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-icenet_geotiff_generator_gen_cloud_tiffs = "icenet_geotiff_generator.preprocess:main"
+icenet_dashboard_preprocess = "icenet_dashboard_preprocessor.preprocess:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

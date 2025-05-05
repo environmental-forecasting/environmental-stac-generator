@@ -1,8 +1,8 @@
-# icenet-geotiff-generator
+# icenet-dashboard-preprocessor
 
-Converts daily IceNet netCDF prediction outputs to Cloud Optimised GeoTIFF files.
+Converts daily IceNet netCDF prediction outputs to COG files + STAC catalogs for `icenet-dashboard`.
 
-A command-line tool for generating **Cloud Optimized GeoTIFFs (COGs)** and **STAC catalogs** from IceNet forecast NetCDF files. It is outputs COGs in the necessary format to serve them using [icenet-geotiff-generator](https://github.com/icenet-ai/icenet-geotiff-generator) for use with the `icenet-dashboard`.
+A command-line tool for generating **Cloud Optimized GeoTIFFs (COGs)** and **STAC catalogs** from IceNet forecast NetCDF files. It is outputs COGs in the necessary format to serve them using [icenet-dashboard-preprocessor](https://github.com/icenet-ai/icenet-dashboard-preprocessor) for use with the `icenet-dashboard`.
 
 ## Features
 
@@ -23,7 +23,7 @@ pip install xarray rioxarray pystac tqdm
 ## Usage
 
 ```bash
-icenet_geotiff_generator_gen_cloud_tiffs --input ./results/predict/*.nc
+icenet_dashboard_preprocess --input ./results/predict/*.nc
 ```
 
 | Flag                  | Description                                                            |
@@ -46,4 +46,4 @@ This will:
 
 ## License
 
-icenet-geotiff-generator is licensed under the MIT license. See [LICENSE](https://github.com/icenet-ai/icenet-geotiff-generator/blob/main/LICENSE) for more information.
+`icenet-dashboard-preprocessor` is licensed under the MIT license. See [LICENSE](https://github.com/icenet-ai/icenet-dashboard-preprocessor/blob/main/LICENSE) for more information.

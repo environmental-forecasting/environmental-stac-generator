@@ -338,6 +338,10 @@ def main():
     else:
         nc_files = [Path(f) for f in args.input]
 
+    if not nc_files:
+        logger.error("No files provided... Please specify which files to convert.")
+        exit(1)
+
     for nc_file in nc_files:
         if not nc_file.exists():
             nc_files.remove(nc_file)

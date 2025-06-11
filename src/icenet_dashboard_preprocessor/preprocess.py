@@ -6,17 +6,18 @@ import logging.config
 import time
 from pathlib import Path, PosixPath
 
+import numpy as np
+import pystac
 import rioxarray
 import xarray as xr
-from tqdm import tqdm
-
-import pystac
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.eo import EOExtension
 from pystac.extensions.projection import ProjectionExtension
+from shapely.geometry import box, mapping
+from tqdm import tqdm
 
-from .utils import flatten_list
 from .stac import IceNetSTAC
+from .utils import flatten_list
 
 logger = logging.getLogger(__name__)
 
@@ -91,15 +92,15 @@ def get_nc_files(
 
 
 def generate_cloud_tiff(
-    nc_file: str | Path, compress: bool = True, reproject: bool = True, overwrite=False
+    nc_file: str | Path, compress: bool = True, overwrite=False, freq="D"
 ) -> None:
     """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
 
     Args:
         compress: Whether to compress the output GeoTIFFs.
                     Default is True.
-        reproject: Whether to re-project the output GeoTIFFs to match the default of Leaflet.
-                    Default is True.
+        overwrite: Whether to overwrite existing outputs.
+                    Default is False.
     """
     compress = "DEFLATE" if compress else "NONE"
     cogs_output_dir = Path("data") / "cogs"
@@ -108,48 +109,28 @@ def generate_cloud_tiff(
     hemisphere = get_hemisphere(nc_file)
 
     with xr.open_dataset(nc_file) as ds:
+        n_leadtime = ds["leadtime"].values
+        lat = ds["lat"].values
+        lon = ds["lon"].values
+
+        # Compute bounding box and geometry from lat/lon
+        bbox = [float(np.min(lon)), float(np.min(lat)), float(np.max(lon)), float(np.max(lat))]
+        geometry = mapping(box(*bbox))
+
+        # Filter 4D variables with dims (time, yc, xc, leadtime)
+        valid_bands = [
+            var for var in ds.data_vars
+            if set(ds[var].dims) >= {'time', 'yc', 'xc', 'leadtime'}
+        ]
+
+        ds_bands = xr.concat([ds[var] for var in valid_bands], dim='band')
+
+        # Assign band names as a coordinate (optional but useful for metadata)
+        ds_bands = ds_bands.assign_coords(band=("band", valid_bands))
+
         # Convert eastings and northings from kilometers to metres.
-        ds = ds.assign_coords(xc=ds.coords["xc"] * 1000, yc=ds.coords["yc"] * 1000)
-
-        # Not mandatory, but found reprojecting can speed things up further down the line
-        if reproject:
-            ds = ds.drop_vars(["lat", "lon"])
-
-        ds = ds.rename({"xc": "x", "yc": "y"})
-
-        # Rearrange array dimension to match rioxarray expectation
-        sic_variable = (
-            ds["sic_mean"].transpose("time", "leadtime", "y", "x").isel(time=0)
-        )
-
-        # Get attributes from NetCDF file
-        nc_attrs = ds.attrs
-        crs = nc_attrs["geospatial_bounds_crs"]
-        forecast_start_time_str = nc_attrs["time_coverage_start"]
-        forecast_end_time_str = nc_attrs["time_coverage_end"]
-        n_leadtime = sic_variable.leadtime.size
-        sic_variable.rio.write_crs(crs, inplace=True)
-
-        # Convert forecast_start_time from "2024-08-31T00:00:00" string to datetime object
-        forecast_start_time = dt.datetime.strptime(
-            forecast_start_time_str, "%Y-%m-%dT%H:%M:%S"
-        )
-        forecast_start_date = forecast_start_time.date()
-        forecast_end_time = dt.datetime.strptime(
-            forecast_end_time_str, "%Y-%m-%dT%H:%M:%S"
-        )
-        forecast_end_date = forecast_end_time.date()
-
-        geo_bounds = (
-            ds.attrs["geospatial_lon_min"].item(),
-            ds.attrs["geospatial_lat_min"].item(),
-            ds.attrs["geospatial_lon_max"].item(),
-            ds.attrs["geospatial_lat_max"].item(),
-        )
-        # geo_bounds = [ -180, -90, 180, 90]
-
-        cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_start_date}")
-        cog_dir.mkdir(parents=True, exist_ok=True)
+        ds_bands = ds_bands.assign_coords(xc=ds.coords["xc"] * 1000, yc=ds.coords["yc"] * 1000)
+        ds_bands = ds_bands.rename({"xc": "x", "yc": "y"})
 
         # Initialise STAC Catalog
         stac_catalog_path = stac_output_dir / "catalog.json"
@@ -162,108 +143,124 @@ def generate_cloud_tiff(
         else:
             catalog = Catalog.from_file(stac_catalog_path)
 
-        # Create (or retrieve) a hemisphere collection within the catalog
-        hemisphere_collection_id = f"{hemisphere}"
-        hemisphere_collection = next(
-            (
-                coll
-                for coll in catalog.get_children()
-                if coll.id == hemisphere_collection_id
-            ),
-            None,
-        )
-        if not hemisphere_collection:
-            print(f"Creating new hemisphere sub-collection for {hemisphere}")
-            hemisphere_collection = Collection(
-                id=f"{hemisphere}",
-                description=f"{hemisphere.capitalize()} hemisphere collection",
-                extent=pystac.Extent(
-                    pystac.SpatialExtent([geo_bounds]),
-                    pystac.TemporalExtent([[forecast_start_time, forecast_end_time]]),
+        # Get attributes from NetCDF file
+        nc_attrs = ds.attrs
+        crs = nc_attrs["geospatial_bounds_crs"]
+        ds_bands.rio.write_crs(crs, inplace=True)
+
+        for time in ds["time"].values:
+            # Rearrange array dimension to match rioxarray expectation
+            ds_variable = (
+                ds_bands.sel(time=time)
+            )
+
+            # Get attributes from NetCDF file
+            forecast_start_time_str = nc_attrs["time_coverage_start"]
+            forecast_end_time_str = nc_attrs["time_coverage_end"]
+
+            # Convert forecast_start_time from "2024-08-31T00:00:00" string to datetime object
+            forecast_start_time = dt.datetime.strptime(
+                forecast_start_time_str, "%Y-%m-%dT%H:%M:%S"
+            )
+            forecast_start_date = forecast_start_time.date()
+            forecast_end_time = dt.datetime.strptime(
+                forecast_end_time_str, "%Y-%m-%dT%H:%M:%S"
+            )
+            forecast_end_date = forecast_end_time.date()
+
+            cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_start_date}")
+            cog_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create (or retrieve) a hemisphere collection within the catalog
+            hemisphere_collection_id = f"{hemisphere}"
+            hemisphere_collection = next(
+                (
+                    coll
+                    for coll in catalog.get_children()
+                    if coll.id == hemisphere_collection_id
                 ),
+                None,
             )
-            catalog.add_child(hemisphere_collection)
+            if not hemisphere_collection:
+                print(f"Creating new hemisphere sub-collection for {hemisphere}")
+                hemisphere_collection = Collection(
+                    id=f"{hemisphere}",
+                    description=f"{hemisphere.capitalize()} hemisphere collection",
+                    extent=pystac.Extent(
+                        pystac.SpatialExtent([bbox]),
+                        pystac.TemporalExtent([[forecast_start_time, forecast_end_time]]),
+                    ),
+                )
+                catalog.add_child(hemisphere_collection)
 
-        # Create (or retrieve) a forecast dated sub-collection under hemisphere collection
-        forecast_collection_id = f"forecast-{forecast_start_date}"
+            # Create (or retrieve) a forecast dated sub-collection under hemisphere collection
+            forecast_collection_id = f"forecast-{forecast_start_date}"
 
-        # Find the first existing collection for this forecast date
-        # If it doesn't exist yet, create a new one, else, skip since it already exists
-        forecast_collection = next(
-            (
-                coll
-                for coll in hemisphere_collection.get_children()
-                if coll.id == forecast_collection_id
-            ),
-            None,
-        )
-        if not forecast_collection:
-            print(f"Creating new collection for {forecast_start_date}")
-            forecast_collection = Collection(
-                id=forecast_collection_id,
-                description=f"Forecast data for {forecast_start_date}",
-                extent=pystac.Extent(
-                    pystac.SpatialExtent([-180, -90, 180, 90]),
-                    pystac.TemporalExtent([[forecast_start_time, forecast_end_time]]),
+            # Find the first existing collection for this forecast date
+            # If it doesn't exist yet, create a new one, else, skip since it already exists
+            forecast_collection = next(
+                (
+                    coll
+                    for coll in hemisphere_collection.get_children()
+                    if coll.id == forecast_collection_id
                 ),
+                None,
             )
-            hemisphere_collection.add_child(forecast_collection)
+            if not forecast_collection:
+                print(f"Creating new collection for {forecast_start_date}")
+                forecast_collection = Collection(
+                    id=forecast_collection_id,
+                    description=f"Forecast data for {forecast_start_date}",
+                    extent=pystac.Extent(
+                        pystac.SpatialExtent(bbox),
+                        pystac.TemporalExtent([[forecast_start_time, forecast_end_time]]),
+                    ),
+                )
+                hemisphere_collection.add_child(forecast_collection)
 
-        # Process each leadtime
-        for i in (pbar := tqdm(range(n_leadtime), desc="COGifying files", leave=True)):
-            cog_file = cog_dir / f"{nc_file.stem}_day_{i}.tif"
-            if cog_file.exists() and not overwrite:
-                pbar.set_description(f"File already exists, skipping: {cog_file}")
-                continue
-            else:
-                pbar.set_description(f"Saving to COG: {cog_file}")
+            # Process each leadtime
+            for i in (pbar := tqdm(range(len(n_leadtime)), desc="COGifying files", leave=True)):
+                cog_file = cog_dir / f"{nc_file.stem}_day_{i}.tif"
+                if cog_file.exists() and not overwrite:
+                    pbar.set_description(f"File already exists, skipping: {cog_file}")
+                    continue
+                else:
+                    pbar.set_description(f"Saving to COG: {cog_file}")
 
-            time_slice = sic_variable.isel(leadtime=i)
+                time_slice = ds_variable.isel(leadtime=i)
 
-            # Reproject to EPSG:3857 (WGS 84 / Web Mercator)
-            if reproject:
-                reprojected_slice = time_slice.rio.reproject("EPSG:3857")
-            else:
-                reprojected_slice = time_slice
+                # Save as COG (Cloud Optimized GeoTIFF)
+                time_slice.rio.to_raster(
+                    cog_file,
+                    driver="COG",
+                    compress=compress,
+                )
 
-            # Save as COG (Cloud Optimized GeoTIFF)
-            reprojected_slice.rio.to_raster(
-                cog_file,
-                driver="COG",
-                compress=compress,
-            )
+                # Add STAC Item for this file
+                item = Item(
+                    id=f"leadtime-{i}",
+                    geometry=geometry,
+                    bbox=bbox,
+                    datetime=forecast_start_time + dt.timedelta(days=i),
+                    properties={
+                        "forecast_start_date": str(forecast_start_date),
+                        "hemisphere": hemisphere,
+                        "leadtime": i,
+                    },
+                )
 
-            # Add STAC Item for this file
-            item = Item(
-                id=f"leadtime-{i}",
-                geometry=None,
-                bbox=geo_bounds,
-                datetime=forecast_start_time + dt.timedelta(days=i),
-                properties={
-                    "forecast_start_date": str(forecast_start_date),
-                    "hemisphere": hemisphere,
-                    "leadtime": i,
-                },
-            )
+                # Add COG asset
+                item.add_asset(
+                    "geotiff",
+                    pystac.Asset(
+                        href=str(cog_file),
+                        media_type=pystac.MediaType.COG,
+                        title=f"GeoTIFF for {hemisphere} with leadtime {i}",
+                    ),
+                )
 
-            # Add Projection extension
-            projection_ext = ProjectionExtension.ext(item, add_if_missing=True)
-            projection_ext.epsg = 3857
-            projection_ext.shape = reprojected_slice.shape
-            projection_ext.bbox = geo_bounds
-
-            # Add COG asset
-            item.add_asset(
-                "geotiff",
-                pystac.Asset(
-                    href=str(cog_file),
-                    media_type=pystac.MediaType.COG,
-                    title=f"GeoTIFF for {hemisphere} with leadtime {i}",
-                ),
-            )
-
-            # Add item to collection
-            forecast_collection.add_item(item)
+                # Add item to collection
+                forecast_collection.add_item(item)
 
         # Save catalog and collections
         stac_output_dir.mkdir(parents=True, exist_ok=True)

@@ -91,6 +91,31 @@ def get_nc_files(
         # raise FileNotFoundError if not p.exists() else NotADirectoryError
 
 
+def get_or_create_catalog(stac_catalog_path: str | Path, catalog_defs: dict) -> Catalog:
+    if stac_catalog_path.exists():
+        return Catalog.from_file(stac_catalog_path)
+    return Catalog(
+        id=catalog_defs["id"],
+        description=catalog_defs["description"],
+        title=catalog_defs["title"],
+    )
+
+
+def get_or_create_collection(parent, collection_id, description, bbox, temporal_extent) -> Collection:
+    collection = next((c for c in parent.get_children() if c.id == collection_id), None)
+    if not collection:
+        collection = Collection(
+            id=collection_id,
+            description=description,
+            extent=pystac.Extent(
+                pystac.SpatialExtent([bbox]),
+                pystac.TemporalExtent([temporal_extent]),
+            ),
+        )
+        parent.add_child(collection)
+    return collection
+
+
 def generate_cloud_tiff(
     nc_file: str | Path, compress: bool = True, overwrite=False, freq="D"
 ) -> None:
@@ -134,14 +159,12 @@ def generate_cloud_tiff(
 
         # Initialise STAC Catalog
         stac_catalog_path = stac_output_dir / "catalog.json"
-        if not stac_catalog_path.exists():
-            catalog = Catalog(
-                id="forecast-data",
-                description="Catalog of IceNet Forecast Data",
-                title="IceNet Forecast STAC Catalog",
-            )
-        else:
-            catalog = Catalog.from_file(stac_catalog_path)
+        catalog_defs = {
+                "id": "forecast-data",
+                "description": "Catalog of IceNet Forecast Data",
+                "title": "IceNet Forecast STAC Catalog",
+        }
+        catalog = get_or_create_catalog(stac_catalog_path, catalog_defs)
 
         # Get attributes from NetCDF file
         nc_attrs = ds.attrs
@@ -172,51 +195,22 @@ def generate_cloud_tiff(
             cog_dir.mkdir(parents=True, exist_ok=True)
 
             # Create (or retrieve) a hemisphere collection within the catalog
-            hemisphere_collection_id = f"{hemisphere}"
-            hemisphere_collection = next(
-                (
-                    coll
-                    for coll in catalog.get_children()
-                    if coll.id == hemisphere_collection_id
-                ),
-                None,
+            hemisphere_collection = get_or_create_collection(
+                parent=catalog,
+                collection_id=hemisphere,
+                description=f"{hemisphere.capitalize()} hemisphere collection",
+                bbox=bbox,
+                temporal_extent=[forecast_start_time, forecast_end_time],
             )
-            if not hemisphere_collection:
-                print(f"Creating new hemisphere sub-collection for {hemisphere}")
-                hemisphere_collection = Collection(
-                    id=f"{hemisphere}",
-                    description=f"{hemisphere.capitalize()} hemisphere collection",
-                    extent=pystac.Extent(
-                        pystac.SpatialExtent([bbox]),
-                        pystac.TemporalExtent([[forecast_start_time, forecast_end_time]]),
-                    ),
-                )
-                catalog.add_child(hemisphere_collection)
 
-            # Create (or retrieve) a forecast dated sub-collection under hemisphere collection
-            forecast_collection_id = f"forecast-{forecast_start_date}"
-
-            # Find the first existing collection for this forecast date
-            # If it doesn't exist yet, create a new one, else, skip since it already exists
-            forecast_collection = next(
-                (
-                    coll
-                    for coll in hemisphere_collection.get_children()
-                    if coll.id == forecast_collection_id
-                ),
-                None,
+            # Create (or retrieve) a forecast collection within the catalog
+            forecast_collection = get_or_create_collection(
+                parent=hemisphere_collection,
+                collection_id=f"forecast-{forecast_start_date}",
+                description=f"Forecast data for {forecast_start_date}",
+                bbox=bbox,
+                temporal_extent=[forecast_start_time, forecast_end_time],
             )
-            if not forecast_collection:
-                print(f"Creating new collection for {forecast_start_date}")
-                forecast_collection = Collection(
-                    id=forecast_collection_id,
-                    description=f"Forecast data for {forecast_start_date}",
-                    extent=pystac.Extent(
-                        pystac.SpatialExtent(bbox),
-                        pystac.TemporalExtent([[forecast_start_time, forecast_end_time]]),
-                    ),
-                )
-                hemisphere_collection.add_child(forecast_collection)
 
             # Process each leadtime
             for i in (pbar := tqdm(range(len(n_leadtime)), desc="COGifying files", leave=True)):
@@ -248,6 +242,11 @@ def generate_cloud_tiff(
                         "leadtime": i,
                     },
                 )
+
+                # Add projection extension
+                ProjectionExtension.add_to(item)
+                proj = ProjectionExtension.ext(item)
+                proj.epsg = int(crs.split(":")[-1]) if "EPSG" in crs else None
 
                 # Add COG asset
                 item.add_asset(

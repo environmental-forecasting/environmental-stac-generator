@@ -243,7 +243,6 @@ def generate_cloud_tiff(
                 # Set spatial dimensions for rioxarray
                 time_slice.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
 
-                # Save as COG (Cloud Optimized GeoTIFF)
                 time_str = forecast_reference_time.strftime("%Y%m%d_%H%M")
                 valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
                 valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
@@ -271,17 +270,17 @@ def generate_cloud_tiff(
                 forecast_collection.add_item(item)
 
                 for var_name in valid_bands:
+                    da_variable = time_slice[var_name]
+                    # Save as COG (Cloud Optimized GeoTIFF)
                     cog_path = cog_dir / f"{item_id}_{var_name}.tif"
                     if cog_path.exists() and not overwrite:
                         pbar.set_description(f"File already exists, skipping: {cog_path}")
                         continue
                     else:
                         pbar.set_description(f"Saving to COG: {cog_path}")
-                    time_slice.rio.to_raster(
-                        cog_path,
-                        driver="COG",
-                        compress=compress,
-                    )
+
+                    da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+                    da_variable.rio.to_raster(cog_path, driver="COG", compress=compress)
 
                     # Add COG asset
                     item.add_asset(

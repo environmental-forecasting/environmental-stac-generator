@@ -5,6 +5,8 @@ import logging.config
 import re
 from pathlib import Path, PosixPath
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pystac
 import rioxarray
@@ -209,6 +211,7 @@ def generate_cloud_tiff(
             # The forecast initialisation time (CF Convention: `forecast_reference_time`) is the first forecast
             forecast_reference_time = pd.to_datetime(time_val.values)
             forecast_reference_date = forecast_reference_time.date()
+            forecast_reference_time_str_fmt = forecast_reference_time.strftime("%Y-%m-%d %H:%M")
 
             forecast_end_time = forecast_reference_time + relativedelta(**{leadtime_unit: leadtime - 1})
 
@@ -269,10 +272,11 @@ def generate_cloud_tiff(
                 # Add item to collection
                 forecast_collection.add_item(item)
 
+                # Save each variable as separate COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
                 for var_name in valid_bands:
                     da_variable = time_slice[var_name]
-                    # Save as COG (Cloud Optimized GeoTIFF)
                     cog_path = cog_dir / f"{item_id}_{var_name}.tif"
+                    thumbnail_path = cog_dir / f"{item_id}_{var_name}.jpg"
                     if cog_path.exists() and not overwrite:
                         pbar.set_description(f"File already exists, skipping: {cog_path}")
                         continue
@@ -293,7 +297,26 @@ def generate_cloud_tiff(
                             roles=["data"],
                             extra_fields={
                                 "variable": var_name
-                            }
+                            },
+                        ),
+                    )
+
+                    # Create a thumbnail plot of the variable
+                    plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
+                    da_variable.plot(cmap='RdBu_r', add_colorbar=True)
+                    plt.axis('off')
+                    plt.title(f"Init: {forecast_reference_time}\nLeadtime: {forecast_reference_time_str_fmt}")
+                    plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
+                    plt.close()
+
+                    # Add thumbnail asset
+                    item.add_asset(
+                        f"{var_name}",
+                        Asset(
+                            href=str(thumbnail_path),
+                            media_type=pystac.MediaType.PNG,
+                            title="Thumbnail",
+                            roles=["thumbnail"],
                         ),
                     )
 

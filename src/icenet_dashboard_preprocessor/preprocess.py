@@ -1,17 +1,16 @@
 import argparse
 import datetime as dt
-import json
 import logging
 import logging.config
-import time
+import re
 from pathlib import Path, PosixPath
 
-import numpy as np
+import pandas as pd
 import pystac
 import rioxarray
 import xarray as xr
+from dateutil.relativedelta import relativedelta
 from pystac import Asset, Catalog, Collection, Item
-from pystac.extensions.eo import EOExtension
 from pystac.extensions.projection import ProjectionExtension
 from shapely.geometry import box, mapping
 from tqdm import tqdm
@@ -52,6 +51,23 @@ def get_hemisphere(netcdf_file: str) -> str:
             return "south"
         else:
             raise ValueError(f"Unexpected minimum latitude value: {lat_min}")
+
+
+def find_coord(ds: xr.Dataset, possible_names: list[str]) -> str | None:
+    """
+    Find coordinate name from a list of possible options in the given dataset.
+
+    Args:
+        ds: The dataset to search for coordinates.
+        possible_names: A list of possible coordinate names.
+
+    Returns:
+        The first matching coordinate name, or None if no match is found.
+    """
+    for name in possible_names:
+        if name in ds.coords:
+            return name
+    return None
 
 
 def get_nc_files(
@@ -101,11 +117,12 @@ def get_or_create_catalog(stac_catalog_path: str | Path, catalog_defs: dict) -> 
     )
 
 
-def get_or_create_collection(parent, collection_id, description, bbox, temporal_extent) -> Collection:
+def get_or_create_collection(parent, collection_id, title, description, bbox, temporal_extent) -> Collection:
     collection = next((c for c in parent.get_children() if c.id == collection_id), None)
     if not collection:
         collection = Collection(
             id=collection_id,
+            title=title,
             description=description,
             extent=pystac.Extent(
                 pystac.SpatialExtent([bbox]),
@@ -117,15 +134,18 @@ def get_or_create_collection(parent, collection_id, description, bbox, temporal_
 
 
 def generate_cloud_tiff(
-    nc_file: str | Path, compress: bool = True, overwrite=False, freq="D"
+    nc_file: str | Path, compress: bool = True, overwrite=False, forecast_frequency="1D"
 ) -> None:
     """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
 
     Args:
-        compress: Whether to compress the output GeoTIFFs.
+        nc_file: The path to the prediction netCDF file.
+        compress (optional): Whether to compress the output GeoTIFFs.
                     Default is True.
-        overwrite: Whether to overwrite existing outputs.
+        overwrite (optional): Whether to overwrite existing outputs.
                     Default is False.
+        forecast_frequency (optional): The forecast frequency of the data.
+                    Default is "1D".
     """
     compress = "DEFLATE" if compress else "NONE"
     cogs_output_dir = Path("data") / "cogs"
@@ -133,29 +153,40 @@ def generate_cloud_tiff(
     nc_file = Path(nc_file).resolve()
     hemisphere = get_hemisphere(nc_file)
 
-    with xr.open_dataset(nc_file) as ds:
-        n_leadtime = ds["leadtime"].values
-        lat = ds["lat"].values
-        lon = ds["lon"].values
+    # Get input time delta options to compute forecast times
+    leadtime_step, leadtime_unit = parse_forecast_frequency(forecast_frequency)
 
-        # Compute bounding box and geometry from lat/lon
-        bbox = [float(np.min(lon)), float(np.min(lat)), float(np.max(lon)), float(np.max(lat))]
+    with xr.open_dataset(nc_file, decode_coords="all") as ds:
+        # Determine spatial coordinates
+        x_coord = find_coord(ds, ["xc", "x", "lon", "longitude"])
+        y_coord = find_coord(ds, ["yc", "y", "lat", "latitude"])
+
+        # Get time-related coordinate information
+        time_coords = ds.coords.get("time", ds.coords.get("forecast_time"))
+        leadtime_coords = ds.coords.get("leadtime", ds.coords.get("lead_time"))
+        leadtime = len(leadtime_coords)
+
+        if x_coord is None or y_coord is None:
+            raise ValueError("Spatial coordinates not found in dataset")
+
+        # Convert eastings and northings from kilometers to metres (if need to).
+        if ds.coords[y_coord].attrs.get("units", None) in ["1000 meter", "km"]: # `1000 meter` is legacy support for `icenet < v0.4.0``
+            ds = ds.assign_coords({y_coord: ds.coords[y_coord] * 1000})
+        if ds.coords[x_coord].attrs.get("units", None) in ["1000 meter", "km"]:
+            ds = ds.assign_coords({x_coord: ds.coords[x_coord] * 1000})
+
+        # Compute bounding box and geometry from coordinates
+        x_min, x_max = float(ds[x_coord].min()), float(ds[x_coord].max())
+        y_min, y_max = float(ds[y_coord].min()), float(ds[y_coord].max())
+        bbox = [x_min, y_min, x_max, y_max]
         geometry = mapping(box(*bbox))
 
-        # Filter 4D variables with dims (time, yc, xc, leadtime)
+        # Filter 4D variables - these are variables of interest for COGs
+        # Assuming other vars shouldn't be converted to COGs
         valid_bands = [
             var for var in ds.data_vars
-            if set(ds[var].dims) >= {'time', 'yc', 'xc', 'leadtime'}
+            if len(ds[var].dims) == 4
         ]
-
-        ds_bands = xr.concat([ds[var] for var in valid_bands], dim='band')
-
-        # Assign band names as a coordinate (optional but useful for metadata)
-        ds_bands = ds_bands.assign_coords(band=("band", valid_bands))
-
-        # Convert eastings and northings from kilometers to metres.
-        ds_bands = ds_bands.assign_coords(xc=ds.coords["xc"] * 1000, yc=ds.coords["yc"] * 1000)
-        ds_bands = ds_bands.rename({"xc": "x", "yc": "y"})
 
         # Initialise STAC Catalog
         stac_catalog_path = stac_output_dir / "catalog.json"
@@ -169,75 +200,63 @@ def generate_cloud_tiff(
         # Get attributes from NetCDF file
         nc_attrs = ds.attrs
         crs = nc_attrs["geospatial_bounds_crs"]
-        ds_bands.rio.write_crs(crs, inplace=True)
+        ds.rio.write_crs(crs, inplace=True)
 
-        for time in ds["time"].values:
+        for time_idx, time_val in enumerate(time_coords):
             # Rearrange array dimension to match rioxarray expectation
-            ds_variable = (
-                ds_bands.sel(time=time)
-            )
+            ds_variable = ds.sel(time=time_val)
 
-            # Get attributes from NetCDF file
-            forecast_start_time_str = nc_attrs["time_coverage_start"]
-            forecast_end_time_str = nc_attrs["time_coverage_end"]
+            # The forecast initialisation time (CF Convention: `forecast_reference_time`) is the first forecast
+            forecast_reference_time = pd.to_datetime(time_val.values)
+            forecast_reference_date = forecast_reference_time.date()
 
-            # Convert forecast_start_time from "2024-08-31T00:00:00" string to datetime object
-            forecast_start_time = dt.datetime.strptime(
-                forecast_start_time_str, "%Y-%m-%dT%H:%M:%S"
-            )
-            forecast_start_date = forecast_start_time.date()
-            forecast_end_time = dt.datetime.strptime(
-                forecast_end_time_str, "%Y-%m-%dT%H:%M:%S"
-            )
-            forecast_end_date = forecast_end_time.date()
+            forecast_end_time = forecast_reference_time + relativedelta(**{leadtime_unit: leadtime - 1})
 
-            cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_start_date}")
+            cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_reference_date}")
             cog_dir.mkdir(parents=True, exist_ok=True)
 
             # Create (or retrieve) a hemisphere collection within the catalog
             hemisphere_collection = get_or_create_collection(
                 parent=catalog,
-                collection_id=hemisphere,
+                collection_id=f"{hemisphere}",
+                title=f"Hemisphere Collection: {hemisphere.capitalize()}",
                 description=f"{hemisphere.capitalize()} hemisphere collection",
                 bbox=bbox,
-                temporal_extent=[forecast_start_time, forecast_end_time],
+                temporal_extent=[forecast_reference_time, forecast_reference_time],
             )
 
             # Create (or retrieve) a forecast collection within the catalog
             forecast_collection = get_or_create_collection(
                 parent=hemisphere_collection,
-                collection_id=f"forecast-{forecast_start_date}",
-                description=f"Forecast data for {forecast_start_date}",
+                collection_id=f"{forecast_reference_date}",
+                title=f"Forecast Collection: {forecast_reference_date}",
+                description=f"Forecast data for {forecast_reference_date}",
                 bbox=bbox,
-                temporal_extent=[forecast_start_time, forecast_end_time],
+                temporal_extent=[forecast_reference_time, forecast_end_time],
             )
 
             # Process each leadtime
-            for i in (pbar := tqdm(range(len(n_leadtime)), desc="COGifying files", leave=True)):
-                cog_file = cog_dir / f"{nc_file.stem}_day_{i}.tif"
-                if cog_file.exists() and not overwrite:
-                    pbar.set_description(f"File already exists, skipping: {cog_file}")
-                    continue
-                else:
-                    pbar.set_description(f"Saving to COG: {cog_file}")
-
+            for i in (pbar := tqdm(range(leadtime), desc="COGifying files", leave=True)):
+                valid_time = forecast_reference_time + relativedelta(**{leadtime_unit: i*leadtime_step})
                 time_slice = ds_variable.isel(leadtime=i)
 
+                # Set spatial dimensions for rioxarray
+                time_slice.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+
                 # Save as COG (Cloud Optimized GeoTIFF)
-                time_slice.rio.to_raster(
-                    cog_file,
-                    driver="COG",
-                    compress=compress,
-                )
+                time_str = forecast_reference_time.strftime("%Y%m%d_%H%M")
+                valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
+                valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
 
                 # Add STAC Item for this file
+                item_id = f"forecast_init{time_str}_lead{valid_time_str}"
                 item = Item(
-                    id=f"leadtime-{i}",
+                    id=item_id,
                     geometry=geometry,
                     bbox=bbox,
-                    datetime=forecast_start_time + dt.timedelta(days=i),
+                    datetime=valid_time,
                     properties={
-                        "forecast_start_date": str(forecast_start_date),
+                        "forecast_reference_time": str(forecast_reference_time),
                         "hemisphere": hemisphere,
                         "leadtime": i,
                     },
@@ -248,18 +267,36 @@ def generate_cloud_tiff(
                 proj = ProjectionExtension.ext(item)
                 proj.epsg = int(crs.split(":")[-1]) if "EPSG" in crs else None
 
-                # Add COG asset
-                item.add_asset(
-                    "geotiff",
-                    pystac.Asset(
-                        href=str(cog_file),
-                        media_type=pystac.MediaType.COG,
-                        title=f"GeoTIFF for {hemisphere} with leadtime {i}",
-                    ),
-                )
-
                 # Add item to collection
                 forecast_collection.add_item(item)
+
+                for var_name in valid_bands:
+                    cog_path = cog_dir / f"{item_id}_{var_name}.tif"
+                    if cog_path.exists() and not overwrite:
+                        pbar.set_description(f"File already exists, skipping: {cog_path}")
+                        continue
+                    else:
+                        pbar.set_description(f"Saving to COG: {cog_path}")
+                    time_slice.rio.to_raster(
+                        cog_path,
+                        driver="COG",
+                        compress=compress,
+                    )
+
+                    # Add COG asset
+                    item.add_asset(
+                        f"{var_name}",
+                        Asset(
+                            href=str(cog_path),
+                            media_type=pystac.MediaType.COG,
+                            title=f"{var_name} at {valid_time_str_fmt}",
+                            description=ds[var_name].long_name or None,
+                            roles=["data"],
+                            extra_fields={
+                                "variable": var_name
+                            }
+                        ),
+                    )
 
         # Save catalog and collections
         stac_output_dir.mkdir(parents=True, exist_ok=True)
@@ -271,9 +308,56 @@ def generate_cloud_tiff(
     return
 
 
+def parse_forecast_frequency(forecast_frequency: str) -> (float, str):
+    """
+    Parse forecast frequency strings like "2hours", "3days", "2weeks", "1months", "0.5years".
+
+    The function extracts the numeric value and unit from the input string,
+    supporting hours (hours), days (days), weeks (weeks), months (months),
+    and years (years) units.
+
+    Args:
+        forecast_frequency: Frequency of the forecast leadtime in the format "<value><unit>"
+
+    Returns:
+        Tuple containing the forecast step size and unit as strings.
+
+    Raises:
+        ValueError: If the input string does not match the expected format.
+
+    Examples:
+        >>> parse_forecast_frequency("2hours")
+        (2.0, 'hours')
+        >>> parse_forecast_frequency("3days")
+        (3.0, 'days')
+        >>> parse_forecast_frequency("1months")
+        (1.0, 'months')
+        >>> parse_forecast_frequency("0.5years")
+        (0.5, 'years')
+    """
+    match = re.match(
+        r"^\s*([0-9]*\.?[0-9]+)\s*(hours?|days?|weeks?|months?|years?)\s*$",
+        forecast_frequency.lower(),
+        re.IGNORECASE,
+    )
+    if match:
+        value, unit = match.groups()
+        return float(value), unit
+    else:
+        raise ValueError(f"Invalid leadtime format: {forecast_frequency}")
+
+
 def get_args():
     parser = argparse.ArgumentParser(
         description="Generate Cloud Optimized GeoTIFFs (COGs) from IceNet prediction netCDF files."
+    )
+
+    # Required argument: The frequency of the forecast lead time
+    # TODO: This should be picked up from `forecast_period` variable (which doesn't exist in icenet)
+    parser.add_argument(
+        "forecast_frequency",
+        type=str,
+        help="The forecast frequency (e.g., 6H, 1D, 2M, 1Y). Units: H=hours, D=days, M=months, Y=years",
     )
 
     # Optional argument: input file or filename path pattern with wildcard
@@ -353,7 +437,12 @@ def main():
     # manifest_entries = []
     for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):
         pbar.set_description(f"Processing {nc_file}")
-        generate_cloud_tiff(nc_file, args.no_compress, overwrite=args.overwrite)
+        generate_cloud_tiff(
+            nc_file,
+            args.no_compress,
+            overwrite=args.overwrite,
+            forecast_frequency=args.forecast_frequency,
+        )
 
 
 if __name__ == "__main__":

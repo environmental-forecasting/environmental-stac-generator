@@ -17,6 +17,7 @@ classifiers = [
 ]
 license = {text = "MIT license"}
 dependencies = [
+    "python-dateutil",
     "numpy",
     "prompt_toolkit==3.0.36",
     "pystac",

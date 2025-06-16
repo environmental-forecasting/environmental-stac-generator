@@ -265,7 +265,7 @@ def generate_cloud_tiff(
                 # Add projection extension
                 ProjectionExtension.add_to(item)
                 proj = ProjectionExtension.ext(item)
-                proj.epsg = int(crs.split(":")[-1]) if "EPSG" in crs else None
+                proj.code = crs
 
                 # Add item to collection
                 forecast_collection.add_item(item)

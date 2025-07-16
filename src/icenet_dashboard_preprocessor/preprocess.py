@@ -426,7 +426,7 @@ def get_args():
     parser.add_argument(
         "forecast_frequency",
         type=str,
-        help="The forecast frequency (e.g., 6H, 1D, 2M, 1Y). Units: H=hours, D=days, M=months, Y=years",
+        help="The forecast frequency (e.g., 6hours, 1days, 2months, 1years). Units: hours, days, months, years",
     )
 
     # Optional argument: input file or filename path pattern with wildcard

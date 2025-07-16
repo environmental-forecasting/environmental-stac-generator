@@ -24,7 +24,7 @@ from .utils import flatten_list
 logger = logging.getLogger(__name__)
 
 
-def get_hemisphere(netcdf_file: str) -> str:
+def get_hemisphere(netcdf_file: Path) -> str:
     """
     Get the hemisphere (either "north" or "south") of the given netCDF file based on its minimum latitude value.
     Args:
@@ -74,8 +74,8 @@ def find_coord(ds: xr.Dataset, possible_names: list[str]) -> str | None:
 
 
 def get_nc_files(
-    location: str | PosixPath, extension="nc"
-) -> list[PosixPath] | PosixPath:
+    location: str | Path, extension="nc"
+) -> list[Path] | Path | None:
     """Get a list of NetCDF files located at the given `location`.
 
     Args:
@@ -110,7 +110,7 @@ def get_nc_files(
         # raise FileNotFoundError if not p.exists() else NotADirectoryError
 
 
-def get_or_create_catalog(stac_catalog_path: str | Path, catalog_defs: dict) -> Catalog:
+def get_or_create_catalog(stac_catalog_path: Path, catalog_defs: dict) -> Catalog:
     if stac_catalog_path.exists():
         return Catalog.from_file(stac_catalog_path)
     return Catalog(
@@ -137,7 +137,7 @@ def get_or_create_collection(parent, collection_id, title, description, bbox, te
 
 
 def generate_cloud_tiff(
-    nc_file: str | Path, compress: bool = True, overwrite=False, forecast_frequency="1D"
+    nc_file: Path, compress: bool = True, overwrite=False, forecast_frequency="1D"
 ) -> None:
     """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
 
@@ -150,7 +150,7 @@ def generate_cloud_tiff(
         forecast_frequency (optional): The forecast frequency of the data.
                     Default is "1D".
     """
-    compress = "DEFLATE" if compress else "NONE"
+    compress_method = "DEFLATE" if compress else "NONE"
     ncdf_output_dir = Path("data") / "netcdf"
     cogs_output_dir = Path("data") / "cogs"
     stac_output_dir = Path("data") / "stac"
@@ -166,8 +166,8 @@ def generate_cloud_tiff(
         y_coord = find_coord(ds, ["yc", "y", "lat", "latitude"])
 
         # Get time-related coordinate information
-        time_coords = ds.coords.get("time", ds.coords.get("forecast_time"))
-        leadtime_coords = ds.coords.get("leadtime", ds.coords.get("lead_time"))
+        time_coords: xr.DataArray = ds.coords.get("time", ds.coords.get("forecast_time"))
+        leadtime_coords: xr.DataArray = ds.coords.get("leadtime", ds.coords.get("lead_time"))
         leadtime = len(leadtime_coords)
 
         if x_coord is None or y_coord is None:
@@ -331,7 +331,7 @@ def generate_cloud_tiff(
                         pbar.set_description(f"Saving to COG: {cog_path}")
 
                     da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
-                    da_variable.rio.to_raster(cog_path, driver="COG", compress=compress)
+                    da_variable.rio.to_raster(cog_path, driver="COG", compress=compress_method)
 
                     # Add COG asset
                     item.add_asset(

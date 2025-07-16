@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import logging.config
 import re
+import shutil
 from pathlib import Path, PosixPath
 
 import matplotlib.pyplot as plt
@@ -150,6 +151,7 @@ def generate_cloud_tiff(
                     Default is "1D".
     """
     compress = "DEFLATE" if compress else "NONE"
+    ncdf_output_dir = Path("data") / "netcdf"
     cogs_output_dir = Path("data") / "cogs"
     stac_output_dir = Path("data") / "stac"
     nc_file = Path(nc_file).resolve()
@@ -204,29 +206,30 @@ def generate_cloud_tiff(
         crs = nc_attrs["geospatial_bounds_crs"]
         ds.rio.write_crs(crs, inplace=True)
 
+        # Get temporal extent range from input netCDF
+        time_coords_start = pd.to_datetime(time_coords.isel(time=0).values)
+        time_coords_end = pd.to_datetime(time_coords.isel(time=-1).values)
+
+        # Create (or retrieve) a hemisphere collection within the catalog
+        hemisphere_collection = get_or_create_collection(
+            parent=catalog,
+            collection_id=f"{hemisphere}",
+            title=f"Hemisphere Collection: {hemisphere.capitalize()}",
+            description=f"{hemisphere.capitalize()} hemisphere collection",
+            bbox=bbox,
+            temporal_extent=[time_coords_start, time_coords_end],
+        )
+
         for time_idx, time_val in enumerate(time_coords):
             # Rearrange array dimension to match rioxarray expectation
-            ds_variable = ds.sel(time=time_val)
+            ds_time_slice = ds.sel(time=time_val)
 
             # The forecast initialisation time (CF Convention: `forecast_reference_time`) is the first forecast
             forecast_reference_time = pd.to_datetime(time_val.values)
             forecast_reference_date = forecast_reference_time.date()
+            forecast_reference_time_str = forecast_reference_time.strftime("%Y%m%d_%H%M")
             forecast_reference_time_str_fmt = forecast_reference_time.strftime("%Y-%m-%d %H:%M")
-
             forecast_end_time = forecast_reference_time + relativedelta(**{leadtime_unit: leadtime - 1})
-
-            cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_reference_date}")
-            cog_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create (or retrieve) a hemisphere collection within the catalog
-            hemisphere_collection = get_or_create_collection(
-                parent=catalog,
-                collection_id=f"{hemisphere}",
-                title=f"Hemisphere Collection: {hemisphere.capitalize()}",
-                description=f"{hemisphere.capitalize()} hemisphere collection",
-                bbox=bbox,
-                temporal_extent=[forecast_reference_time, forecast_reference_time],
-            )
 
             # Create (or retrieve) a forecast collection within the catalog
             forecast_collection = get_or_create_collection(
@@ -238,22 +241,66 @@ def generate_cloud_tiff(
                 temporal_extent=[forecast_reference_time, forecast_end_time],
             )
 
+            # Create output dirs
+            ncdf_dir = Path(ncdf_output_dir / f"{hemisphere}/{forecast_reference_date}")
+            ncdf_dir.mkdir(parents=True, exist_ok=True)
+            cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_reference_date}")
+            cog_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save the forecast init slice as a netcdf file
+            item_id_nc = f"forecast_init_{forecast_reference_time_str}"
+            nc_path = ncdf_dir / f"{item_id_nc}.nc"
+            encoding = {
+                var: {
+                    "zlib": True,
+                    "complevel": 5,
+                } for var in ds_time_slice.data_vars
+            }
+            ds_time_slice.to_netcdf(
+                nc_path,
+                engine="h5netcdf",
+                encoding=encoding,
+            )
+
+            # Add STAC Item for this netCDF file
+            item = Item(
+                id=item_id_nc,
+                geometry=geometry,
+                bbox=bbox,
+                datetime=forecast_reference_time,
+                properties={
+                    "forecast_reference_time": str(forecast_reference_time),
+                    "hemisphere": hemisphere,
+                },
+            )
+
+            # Add netCDF asset
+            item.add_asset(
+                "netcdf",
+                Asset(
+                    href=str(nc_path),
+                    media_type=pystac.MediaType.COG,
+                    title=f"netCDF for {forecast_reference_time_str_fmt}",
+                    description=f"netCDF file container forecast variables for forecast initialised at: {forecast_reference_time_str_fmt}",
+                    roles=["data"],
+                ),
+            )
+
             # Process each leadtime
             for i in (pbar := tqdm(range(leadtime), desc="COGifying files", leave=True)):
                 valid_time = forecast_reference_time + relativedelta(**{leadtime_unit: i*leadtime_step})
-                time_slice = ds_variable.isel(leadtime=i)
+                ds_leadtime_slice = ds_time_slice.isel(leadtime=i)
 
                 # Set spatial dimensions for rioxarray
-                time_slice.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+                ds_leadtime_slice.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
 
-                time_str = forecast_reference_time.strftime("%Y%m%d_%H%M")
                 valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
                 valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
 
                 # Add STAC Item for this file
-                item_id = f"forecast_init{time_str}_lead{valid_time_str}"
+                item_id_cog = f"forecast_init_{forecast_reference_time_str}_lead_{valid_time_str}"
                 item = Item(
-                    id=item_id,
+                    id=item_id_cog,
                     geometry=geometry,
                     bbox=bbox,
                     datetime=valid_time,
@@ -274,9 +321,9 @@ def generate_cloud_tiff(
 
                 # Save each variable as separate COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
                 for var_name in valid_bands:
-                    da_variable = time_slice[var_name]
-                    cog_path = cog_dir / f"{item_id}_{var_name}.tif"
-                    thumbnail_path = cog_dir / f"{item_id}_{var_name}.jpg"
+                    da_variable = ds_leadtime_slice[var_name]
+                    cog_path = cog_dir / f"{item_id_cog}_{var_name}.tif"
+                    thumbnail_path = cog_dir / f"{item_id_cog}_{var_name}.jpg"
                     if cog_path.exists() and not overwrite:
                         pbar.set_description(f"File already exists, skipping: {cog_path}")
                         continue

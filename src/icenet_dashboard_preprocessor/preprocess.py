@@ -1,8 +1,5 @@
-import argparse
-import datetime as dt
+
 import logging
-import logging.config
-import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -16,97 +13,12 @@ from pystac.extensions.projection import ProjectionExtension
 from shapely.geometry import box, mapping
 from tqdm import tqdm
 
+from .cli import get_args, parse_forecast_frequency
 from .cog import write_cog
 from .stac import IceNetSTAC
-from .utils import flatten_list
+from .utils import find_coord, flatten_list, get_hemisphere, get_nc_files
 
 logger = logging.getLogger(__name__)
-
-
-def get_hemisphere(netcdf_file: Path) -> str:
-    """
-    Get the hemisphere (either "north" or "south") of the given netCDF file based on its minimum latitude value.
-    Args:
-        netcdf_file: Path to a netCDF file.
-                     It must have geospatial information in its attributes.
-    Returns:
-        The hemisphere associated with the given netCDF file ("north" or "south").
-    Raises:
-        ValueError: If the minimum latitude value is not within the expected range (-90 to 90).
-    Examples:
-        >>> get_hemisphere("results/predict/fc.2024-11-11_north.nc")
-        'north'
-
-        >>> get_hemisphere("results/predict/fc.2024-11-11_south.nc")
-        'south'
-    """
-    with xr.open_dataset(netcdf_file) as ds:
-        # Extract the minimum latitude value from the dataset's attributes
-        lat_min = ds.attrs.get("geospatial_lat_min", None)
-
-        if lat_min is None:
-            raise ValueError("NetCDF file does not contain geospatial information.")
-
-        if 0 <= lat_min <= 90:
-            return "north"
-        elif -90 <= lat_min < 0:
-            return "south"
-        else:
-            raise ValueError(f"Unexpected minimum latitude value: {lat_min}")
-
-
-def find_coord(ds: xr.Dataset, possible_names: list[str]) -> str | None:
-    """
-    Find coordinate name from a list of possible options in the given dataset.
-
-    Args:
-        ds: The dataset to search for coordinates.
-        possible_names: A list of possible coordinate names.
-
-    Returns:
-        The first matching coordinate name, or None if no match is found.
-    """
-    for name in possible_names:
-        if name in ds.coords:
-            return name
-    return None
-
-
-def get_nc_files(
-    location: str | Path, extension="nc"
-) -> list[Path] | Path | None:
-    """Get a list of NetCDF files located at the given `location`.
-
-    Args:
-        location: The path to check for NetCDF files.
-        extension: The file extension to filter by.
-                    Defaults to "nc".
-    Returns:
-        A list of NetCDF file paths if `location` is a directory, or the single NetCDF file
-             path if `location` is a file. If `location` is invalid, returns None.
-    Raises:
-        FileNotFoundError: If `location` does not exist.
-        NotADirectoryError: If `location` is a file and no matching file with the given extension exists.
-    Examples:
-        >>> get_nc_files("/path/to/netcdf/files")
-        [<PosixPath('/path/to/netcdf/files/file1.nc')>, <PosixPath('/path/to/netcdf/files/file2.nc')>]
-
-        >>> get_nc_files("/path/to/single/file.nc")
-        <PosixPath('/path/to/single/file.nc')>
-    """
-    p = Path(location)
-
-    if p.is_dir():
-        # Return all NetCDF files if directory specified
-        return list(p.glob(f"*.{extension}"))
-    elif p.is_file() and p.suffix.lower() == f".{extension}":
-        # Return file path if file is specified and matches the given extension.
-        return p.resolve()
-    else:
-        logger.error(
-            f"Location {location} is invalid or does not contain a matching file with the given extension."
-        )
-        # raise FileNotFoundError if not p.exists() else NotADirectoryError
 
 
 def get_or_create_catalog(stac_catalog_path: Path, catalog_defs: dict) -> Catalog:
@@ -182,7 +94,7 @@ def generate_cloud_tiff(
         x_min, x_max = float(ds[x_coord].min()), float(ds[x_coord].max())
         y_min, y_max = float(ds[y_coord].min()), float(ds[y_coord].max())
         bbox = [x_min, y_min, x_max, y_max]
-        geometry = mapping(box(*bbox))
+        geometry = mapping(box(*bbox)) # type: ignore
 
         # Filter 4D variables - these are variables of interest for COGs
         # Assuming other vars shouldn't be converted to COGs
@@ -352,7 +264,7 @@ def generate_cloud_tiff(
 
                     # Create a thumbnail plot of the variable
                     plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
-                    da_variable.plot(cmap='RdBu_r', add_colorbar=True)
+                    da_variable.plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
                     plt.axis('off')
                     plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
                     plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
@@ -379,86 +291,6 @@ def generate_cloud_tiff(
     return
 
 
-def parse_forecast_frequency(forecast_frequency: str) -> (float, str):
-    """
-    Parse forecast frequency strings like "2hours", "3days", "2weeks", "1months", "0.5years".
-
-    The function extracts the numeric value and unit from the input string,
-    supporting hours (hours), days (days), weeks (weeks), months (months),
-    and years (years) units.
-
-    Args:
-        forecast_frequency: Frequency of the forecast leadtime in the format "<value><unit>"
-
-    Returns:
-        Tuple containing the forecast step size and unit as strings.
-
-    Raises:
-        ValueError: If the input string does not match the expected format.
-
-    Examples:
-        >>> parse_forecast_frequency("2hours")
-        (2.0, 'hours')
-        >>> parse_forecast_frequency("3days")
-        (3.0, 'days')
-        >>> parse_forecast_frequency("1months")
-        (1.0, 'months')
-        >>> parse_forecast_frequency("0.5years")
-        (0.5, 'years')
-    """
-    match = re.match(
-        r"^\s*([0-9]*\.?[0-9]+)\s*(hours?|days?|weeks?|months?|years?)\s*$",
-        forecast_frequency.lower(),
-        re.IGNORECASE,
-    )
-    if match:
-        value, unit = match.groups()
-        return float(value), unit
-    else:
-        raise ValueError(f"Invalid leadtime format: {forecast_frequency}")
-
-
-def get_args():
-    parser = argparse.ArgumentParser(
-        description="Generate Cloud Optimized GeoTIFFs (COGs) from IceNet prediction netCDF files."
-    )
-
-    # Required argument: The frequency of the forecast lead time
-    # TODO: This should be picked up from `forecast_period` variable (which doesn't exist in icenet)
-    parser.add_argument(
-        "forecast_frequency",
-        type=str,
-        help="The forecast frequency (e.g., 6hours, 1days, 2months, 1years). Units: hours, days, months, years",
-    )
-
-    # Optional argument: input file or filename path pattern with wildcard
-    parser.add_argument(
-        "-i",
-        "--input",
-        nargs="*",
-        help="Input directory or filename path pattern with wildcard (e.g., ./results/predict/*.nc)",
-    )
-
-    # Optional boolean flag to force overwrite of existing files
-    parser.add_argument(
-        "-o",
-        "--overwrite",
-        action="store_true",
-        help="Enable overwriting of existing COGs",
-    )
-
-    # Optional boolean flag to disable COG compression
-    parser.add_argument(
-        "-c",
-        "--no_compress",
-        action="store_true",
-        default=True,
-        help="Disable COG compression (default is compressed)",
-    )
-
-    return parser.parse_args()
-
-
 def main():
     """
     The main function of the Icenet Dashboard Preprocessor.
@@ -471,10 +303,16 @@ def main():
             --input (List[str]): List of input netCDF files or directories.
             --compress (bool): Whether to compress the output COG files.
             --overwrite (bool): Whether to overwrite existing COG files.
+
     Raises:
         FileNotFoundError: If no valid netCDF files are found for processing.
+
     Returns:
         None
+
+    Examples:
+        For daily forecasting
+        >>> icenet_dashboard_preprocess 1days -i raw_data/*.nc
     """
     args = get_args()
     logger.debug(f"Command line input arguments: {args}")
@@ -505,8 +343,7 @@ def main():
         logger.warning("No netCDF files found for processing")
         raise FileNotFoundError(f"{args.input} is invalid")
 
-    # manifest_entries = []
-    for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):
+    for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)): # type: ignore
         pbar.set_description(f"Processing {nc_file}")
         generate_cloud_tiff(
             nc_file,

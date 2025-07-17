@@ -137,7 +137,7 @@ def get_or_create_collection(parent, collection_id, title, description, bbox, te
 
 
 def generate_cloud_tiff(
-    nc_file: Path, compress: bool = True, overwrite=False, forecast_frequency="1D"
+    nc_file: Path, compress: bool = True, overwrite=False, forecast_frequency="1days"
 ) -> None:
     """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
 
@@ -148,7 +148,7 @@ def generate_cloud_tiff(
         overwrite (optional): Whether to overwrite existing outputs.
                     Default is False.
         forecast_frequency (optional): The forecast frequency of the data.
-                    Default is "1D".
+                    Default is "1days".
     """
     compress_method = "DEFLATE" if compress else "NONE"
     ncdf_output_dir = Path("data") / "netcdf"

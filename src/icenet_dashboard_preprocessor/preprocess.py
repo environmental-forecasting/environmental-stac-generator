@@ -352,7 +352,7 @@ def generate_cloud_tiff(
                     plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
                     da_variable.plot(cmap='RdBu_r', add_colorbar=True)
                     plt.axis('off')
-                    plt.title(f"Init: {forecast_reference_time}\nLeadtime: {forecast_reference_time_str_fmt}")
+                    plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
                     plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
                     plt.close()
 

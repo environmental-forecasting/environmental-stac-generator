@@ -3,11 +3,9 @@ import datetime as dt
 import logging
 import logging.config
 import re
-import shutil
-from pathlib import Path, PosixPath
+from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import pystac
 import rioxarray
@@ -18,6 +16,7 @@ from pystac.extensions.projection import ProjectionExtension
 from shapely.geometry import box, mapping
 from tqdm import tqdm
 
+from .cog import write_cog
 from .stac import IceNetSTAC
 from .utils import flatten_list
 
@@ -274,7 +273,7 @@ def generate_cloud_tiff(
                 },
             )
 
-            # Add netCDF asset
+            # Add netCDF asset to item
             item.add_asset(
                 "netcdf",
                 Asset(
@@ -330,10 +329,13 @@ def generate_cloud_tiff(
                     else:
                         pbar.set_description(f"Saving to COG: {cog_path}")
 
+                    # Add metadata to extracted variable so `to_raster` includes them in the output GeoTIFF
+                    da_variable.rio.write_crs(crs, inplace=True)
                     da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
-                    da_variable.rio.to_raster(cog_path, driver="COG", compress=compress_method)
+                    # da_variable.rio.to_raster(cog_path, driver="COG", compress=compress_method)
+                    write_cog(cog_path, da_variable, compress=compress_method)
 
-                    # Add COG asset
+                    # Add COG asset to item
                     item.add_asset(
                         f"{var_name}",
                         Asset(
@@ -356,7 +358,7 @@ def generate_cloud_tiff(
                     plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
                     plt.close()
 
-                    # Add thumbnail asset
+                    # Add thumbnail asset to item
                     item.add_asset(
                         f"{var_name}",
                         Asset(

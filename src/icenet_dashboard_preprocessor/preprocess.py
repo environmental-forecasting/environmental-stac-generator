@@ -1,6 +1,7 @@
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -13,10 +14,9 @@ from pystac.extensions.projection import ProjectionExtension
 from shapely.geometry import box, mapping
 from tqdm import tqdm
 
-from .cli import get_args, parse_forecast_frequency
 from .cog import write_cog
 from .stac import IceNetSTAC
-from .utils import find_coord, flatten_list, get_hemisphere, get_nc_files
+from .utils import find_coord, flatten_list, get_hemisphere, get_nc_files, parse_forecast_frequency
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +291,7 @@ def generate_cloud_tiff(
     return
 
 
-def main():
+def main(args: SimpleNamespace):
     """
     The main function of the Icenet Dashboard Preprocessor.
 
@@ -299,7 +299,7 @@ def main():
     using the given CLI arguments.
 
     Args:
-        args (Namespace): Command line argument parser. The expected keys are:
+        args: Parsed Command line arguments. The expected keys are:
             --input (List[str]): List of input netCDF files or directories.
             --compress (bool): Whether to compress the output COG files.
             --overwrite (bool): Whether to overwrite existing COG files.
@@ -312,9 +312,8 @@ def main():
 
     Examples:
         For daily forecasting
-        >>> icenet_dashboard_preprocess 1days -i raw_data/*.nc
+        >>> dashboard preprocess 1days raw_data/*.nc
     """
-    args = get_args()
     logger.debug(f"Command line input arguments: {args}")
     if args.input is None:
         default_dir = "results/predict"
@@ -351,7 +350,3 @@ def main():
             overwrite=args.overwrite,
             forecast_frequency=args.forecast_frequency,
         )
-
-
-if __name__ == "__main__":
-    main()

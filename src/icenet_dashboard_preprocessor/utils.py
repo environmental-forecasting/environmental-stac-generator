@@ -1,9 +1,40 @@
 import logging
+import re
 from pathlib import Path
 
 import xarray as xr
 
 logger = logging.getLogger(__name__)
+
+
+def find_coord(ds: xr.Dataset, possible_names: list[str]) -> str | None:
+    """
+    Find coordinate name from a list of possible options in the given dataset.
+
+    Args:
+        ds: The dataset to search for coordinates.
+        possible_names: A list of possible coordinate names.
+
+    Returns:
+        The first matching coordinate name, or None if no match is found.
+    """
+    for name in possible_names:
+        if name in ds.coords:
+            return name
+    return None
+
+
+def flatten_list(lst):
+    """Flatten a list of lists (or tuples)"""
+    return [
+        item
+        for sublist in lst
+        for item in (
+            flatten_list(sublist)
+            if isinstance(sublist, list) or isinstance(sublist, tuple)
+            else [sublist]
+        )
+    ]
 
 
 def get_hemisphere(netcdf_file: Path) -> str:
@@ -40,23 +71,6 @@ def get_hemisphere(netcdf_file: Path) -> str:
             return "south"
         else:
             raise ValueError(f"Unexpected minimum latitude value: {lat_min}")
-
-
-def find_coord(ds: xr.Dataset, possible_names: list[str]) -> str | None:
-    """
-    Find coordinate name from a list of possible options in the given dataset.
-
-    Args:
-        ds: The dataset to search for coordinates.
-        possible_names: A list of possible coordinate names.
-
-    Returns:
-        The first matching coordinate name, or None if no match is found.
-    """
-    for name in possible_names:
-        if name in ds.coords:
-            return name
-    return None
 
 
 def get_nc_files(location: str | Path, extension="nc") -> list[Path] | Path | None:
@@ -96,14 +110,40 @@ def get_nc_files(location: str | Path, extension="nc") -> list[Path] | Path | No
         # raise FileNotFoundError if not p.exists() else NotADirectoryError
 
 
-def flatten_list(lst):
-    """Flatten a list of lists (or tuples)"""
-    return [
-        item
-        for sublist in lst
-        for item in (
-            flatten_list(sublist)
-            if isinstance(sublist, list) or isinstance(sublist, tuple)
-            else [sublist]
-        )
-    ]
+def parse_forecast_frequency(forecast_frequency: str) -> (float, str):
+    """
+    Parse forecast frequency strings like "2hours", "3days", "2weeks", "1months", "0.5years".
+
+    The function extracts the numeric value and unit from the input string,
+    supporting hours (hours), days (days), weeks (weeks), months (months),
+    and years (years) units.
+
+    Args:
+        forecast_frequency: Frequency of the forecast leadtime in the format "<value><unit>"
+
+    Returns:
+        Tuple containing the forecast step size and unit as strings.
+
+    Raises:
+        ValueError: If the input string does not match the expected format.
+
+    Examples:
+        >>> parse_forecast_frequency("2hours")
+        (2.0, 'hours')
+        >>> parse_forecast_frequency("3days")
+        (3.0, 'days')
+        >>> parse_forecast_frequency("1months")
+        (1.0, 'months')
+        >>> parse_forecast_frequency("0.5years")
+        (0.5, 'years')
+    """
+    match = re.match(
+        r"^\s*([0-9]*\.?[0-9]+)\s*(hours?|days?|weeks?|months?|years?)\s*$",
+        forecast_frequency.lower(),
+        re.IGNORECASE,
+    )
+    if match:
+        value, unit = match.groups()
+        return float(value), unit
+    else:
+        raise ValueError(f"Invalid leadtime format: {forecast_frequency}")

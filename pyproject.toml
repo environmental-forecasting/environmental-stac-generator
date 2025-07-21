@@ -27,6 +27,7 @@ dependencies = [
     "rioxarray",
     "shapely",
     "tqdm",
+    "typer",
     "xarray[io]",
 ]
 
@@ -40,6 +41,7 @@ dev = [
 
 [project.scripts]
 icenet_dashboard_preprocess = "icenet_dashboard_preprocessor.preprocess:main"
+dashboard = "icenet_dashboard_preprocessor.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

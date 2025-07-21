@@ -14,28 +14,37 @@ A command-line tool for generating **Cloud Optimized GeoTIFFs (COGs)** and **STA
 
 ## Installation
 
-To use this tool, ensure the following dependencies are installed:
+To use this tool, ensure the dependencies from [pyproject.toml](pyproject.toml) are installed. Or, for an editable install, clone the repo and run the following after changing directory to the repo root:
 
 ```bash
-pip install xarray rioxarray pystac tqdm
+pip install -e .
 ```
 
 ## Usage
 
 ```bash
-icenet_dashboard_preprocess --input ./results/predict/*.nc
+dashboard preprocess 1days ./results/predict/*.nc
 ```
+
+### Positional Parameters
+
+The first parameter is the forecast frequency.
+
+The second and further arguments are the paths to one or more `.nc` files.
+
+### Options
+
+The optional flags that can be used are:
 
 | Flag                  | Description                                                            |
 | --------------------- | ---------------------------------------------------------------------- |
-| `--input`, `-i`       | One or more paths to `.nc` files or directories (wildcards supported). |
 | `--overwrite`, `-o`   | Overwrite existing GeoTIFF files if they already exist.                |
 | `--no_compress`, `-c` | Disable compression in generated GeoTIFFs (default is compressed).     |
 
 ## Example
 
 ```bash
-icenet_geotiff_generator_gen_cloud_tiffs -i results/predict/fc.2024-11-11_north.nc -o
+dashboard preprocess 1days raw_data/*.nc -o
 ```
 
 This will:

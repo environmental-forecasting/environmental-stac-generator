@@ -70,6 +70,7 @@ def generate_cloud_tiff(
     ncdf_output_dir = Path("data") / "netcdf" / name
     cogs_output_dir = Path("data") / "cogs" / name
     stac_output_dir = Path("data") / "stac" # This has dir with `name` created by itself
+    stac_output_dir.mkdir(parents=True, exist_ok=True)
     nc_file = Path(nc_file).resolve()
     hemisphere = get_hemisphere(nc_file)
 
@@ -278,12 +279,12 @@ def generate_cloud_tiff(
                     )
 
                     # Create a thumbnail plot of the variable
-                    plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
+                    fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
                     da_variable.plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
                     plt.axis('off')
                     plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
                     plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
-                    plt.close()
+                    plt.close(fig)
 
                     # Add thumbnail asset to item
                     # Some STAC tools may only show the first thumbnail asset
@@ -298,7 +299,6 @@ def generate_cloud_tiff(
                     )
 
         # Save catalog and collections
-        stac_output_dir.mkdir(parents=True, exist_ok=True)
         catalog.normalize_hrefs(
             str(stac_output_dir),
         )

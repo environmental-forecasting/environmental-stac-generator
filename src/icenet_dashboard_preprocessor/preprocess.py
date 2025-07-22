@@ -286,12 +286,13 @@ def generate_cloud_tiff(
                     plt.close()
 
                     # Add thumbnail asset to item
+                    # Some STAC tools may only show the first thumbnail asset
                     item.add_asset(
-                        f"{var_name}",
+                        f"thumbnail_{var_name}",
                         Asset(
                             href=str(thumbnail_path),
-                            media_type=pystac.MediaType.PNG,
-                            title="Thumbnail",
+                            media_type=pystac.MediaType.JPEG,
+                            title=f"{var_name.capitalize()} Thumbnail",
                             roles=["thumbnail"],
                         ),
                     )

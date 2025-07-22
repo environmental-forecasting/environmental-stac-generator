@@ -48,12 +48,17 @@ def get_or_create_collection(parent, collection_id, title, description, bbox, te
 
 
 def generate_cloud_tiff(
-    nc_file: Path, compress: bool = True, overwrite=False, forecast_frequency="1days"
+    nc_file: Path,
+    name: str,
+    compress: bool = True,
+    overwrite=False,
+    forecast_frequency="1days",
 ) -> None:
     """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
 
     Args:
         nc_file: The path to the prediction netCDF file.
+        name: High-level collection name.
         compress (optional): Whether to compress the output GeoTIFFs.
                     Default is True.
         overwrite (optional): Whether to overwrite existing outputs.
@@ -62,9 +67,9 @@ def generate_cloud_tiff(
                     Default is "1days".
     """
     compress_method = "DEFLATE" if compress else "NONE"
-    ncdf_output_dir = Path("data") / "netcdf"
-    cogs_output_dir = Path("data") / "cogs"
-    stac_output_dir = Path("data") / "stac"
+    ncdf_output_dir = Path("data") / "netcdf" / name
+    cogs_output_dir = Path("data") / "cogs" / name
+    stac_output_dir = Path("data") / "stac" # This has dir with `name` created by itself
     nc_file = Path(nc_file).resolve()
     hemisphere = get_hemisphere(nc_file)
 
@@ -121,10 +126,20 @@ def generate_cloud_tiff(
         time_coords_start = pd.to_datetime(time_coords.isel(time=0).values)
         time_coords_end = pd.to_datetime(time_coords.isel(time=-1).values)
 
+        # Create (or retrieve) highest level collection (model name) within the catalog
+        main_collection = get_or_create_collection(
+            parent=catalog,
+            collection_id=name,
+            title=f"Model Collection: {name}",
+            description=f"{name} collection",
+            bbox=bbox,
+            temporal_extent=[time_coords_start, time_coords_end],
+        )
+
         # Create (or retrieve) a hemisphere collection within the catalog
         hemisphere_collection = get_or_create_collection(
-            parent=catalog,
-            collection_id=f"{hemisphere}",
+            parent=main_collection,
+            collection_id=hemisphere,
             title=f"Hemisphere Collection: {hemisphere.capitalize()}",
             description=f"{hemisphere.capitalize()} hemisphere collection",
             bbox=bbox,
@@ -293,14 +308,14 @@ def generate_cloud_tiff(
 
 def main(args: SimpleNamespace):
     """
-    The main function of the Icenet Dashboard Preprocessor.
+    Main function to generate COGs and generate static JSON STAC catalog.
 
     This function processes netCDF files and generates cloud-optimized geotiffs (COGs)
     using the given CLI arguments.
 
     Args:
         args: Parsed Command line arguments. The expected keys are:
-            --input (List[str]): List of input netCDF files or directories.
+            input (List[str]): List of input netCDF files or directories (positional argument).
             --compress (bool): Whether to compress the output COG files.
             --overwrite (bool): Whether to overwrite existing COG files.
 
@@ -346,7 +361,8 @@ def main(args: SimpleNamespace):
         pbar.set_description(f"Processing {nc_file}")
         generate_cloud_tiff(
             nc_file,
-            args.no_compress,
+            name=args.name,
+            compress=args.no_compress,
             overwrite=args.overwrite,
             forecast_frequency=args.forecast_frequency,
         )

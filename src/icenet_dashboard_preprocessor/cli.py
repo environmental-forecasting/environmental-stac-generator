@@ -1,10 +1,10 @@
 import sys
-import typer
-
 from types import SimpleNamespace
 
+import typer
+
+from .ingest import main as ingest_main
 from .preprocess import main as preprocess_main
-# from .ingest import main as ingest_main
 
 app = typer.Typer()
 
@@ -29,6 +29,12 @@ def preprocess(
         "--no-compress",
         help="Disable COG compression (default is compressed)",
     ),
+    flat: bool = typer.Option(
+        False,
+        "-f",
+        "--flat",
+        help="Flatten the STAC JSON output for pgSTAC compatibility (default is not flat)",
+    ),
 ):
     print("Command:", " ".join(sys.argv))
     args = SimpleNamespace(
@@ -37,6 +43,7 @@ def preprocess(
         name=name,
         overwrite=overwrite,
         no_compress=no_compress,
+        flat=flat,
     )
     preprocess_main(args)
 
@@ -49,7 +56,7 @@ def ingest(
     args = SimpleNamespace(
         catalog = catalog,
     )
-#     ingest_main(args)
+    ingest_main(args)
 
 
 def main():

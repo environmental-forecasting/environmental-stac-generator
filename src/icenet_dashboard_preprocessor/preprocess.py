@@ -1,33 +1,42 @@
-
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
+import orjson
 import pandas as pd
 import pystac
 import rioxarray
 import xarray as xr
 from dateutil.relativedelta import relativedelta
+from deepdiff import DeepDiff
+from dotenv import load_dotenv
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
 from shapely.geometry import box, mapping
 from tqdm import tqdm
 
 from .cog import write_cog
-from .stac import IceNetSTAC
-from .utils import find_coord, flatten_list, get_hemisphere, get_nc_files, parse_forecast_frequency
+from .utils import (
+    find_coord,
+    flatten_list,
+    get_hemisphere,
+    get_nc_files,
+    parse_forecast_frequency,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def get_or_create_catalog(stac_catalog_path: Path, catalog_defs: dict) -> Catalog:
-    if stac_catalog_path.exists():
-        return Catalog.from_file(stac_catalog_path)
+def get_or_create_catalog(catalog_file: Path, catalog_defs: dict) -> Catalog:
+    if catalog_file.exists():
+        return Catalog.from_file(catalog_file)
     return Catalog(
         id=catalog_defs["id"],
         description=catalog_defs["description"],
         title=catalog_defs["title"],
+        href=str(catalog_file),
     )
 
 
@@ -51,8 +60,10 @@ def generate_cloud_tiff(
     nc_file: Path,
     name: str,
     compress: bool = True,
-    overwrite=False,
-    forecast_frequency="1days",
+    overwrite: bool = False,
+    forecast_frequency: str = "1days",
+    flat: bool = False,
+    url_base: str | None = None,
 ) -> None:
     """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
 
@@ -65,11 +76,47 @@ def generate_cloud_tiff(
                     Default is False.
         forecast_frequency (optional): The forecast frequency of the data.
                     Default is "1days".
+        flat (optional): Whether to generate a flat STAC catalog for pgSTAC.
+                    Default is False.
     """
     compress_method = "DEFLATE" if compress else "NONE"
-    ncdf_output_dir = Path("data") / "netcdf" / name
-    cogs_output_dir = Path("data") / "cogs" / name
-    stac_output_dir = Path("data") / "stac" # This has dir with `name` created by itself
+    data_path = Path("data")
+    ncdf_output_dir = data_path / "netcdf" / name
+    cogs_output_dir = data_path / "cogs" / name
+    config_output_path = data_path / "config.json"
+
+    # Store input options to file
+    config_data = {
+        name: {
+            "forecast_frequency": forecast_frequency,
+            "flat": flat,
+        }
+    }
+
+    # Ensure we're running with same options as any previous runs
+    if config_output_path.exists():
+        with open(config_output_path, "rb") as f:
+            current_config_data = orjson.loads(f.read())
+            diff = DeepDiff(config_data[name], current_config_data[name])
+            if diff:
+                logger.error(
+                    "Running with different options to previous! Run with old values (below) to continue!"
+                )
+                logger.error(config_data)
+                exit(1)
+    else:
+        config_output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_output_path, "wb") as f:
+            f.write(orjson.dumps(config_data, option=orjson.OPT_INDENT_2))
+
+    # The base URL for the STAC catalogs.
+    # If set, the root of the STAC href links will use this url as the base path
+    load_dotenv()
+    FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", None)
+    logger.info(f"FILE_SERVER_URL: {FILE_SERVER_URL}")
+
+    # This has dir with `name` created by itself
+    stac_output_dir = Path("data") / "stac"
     stac_output_dir.mkdir(parents=True, exist_ok=True)
     nc_file = Path(nc_file).resolve()
     hemisphere = get_hemisphere(nc_file)
@@ -112,9 +159,9 @@ def generate_cloud_tiff(
         # Initialise STAC Catalog
         stac_catalog_path = stac_output_dir / "catalog.json"
         catalog_defs = {
-                "id": "forecast-data",
-                "description": "Catalog of IceNet Forecast Data",
-                "title": "IceNet Forecast STAC Catalog",
+                "id": "bas-environmental-forecasts",
+                "description": "Catalog of BAS Environmental Forecast Data",
+                "title": "BAS Environmental Forecasting STAC Catalog",
         }
         catalog = get_or_create_catalog(stac_catalog_path, catalog_defs)
 
@@ -137,15 +184,16 @@ def generate_cloud_tiff(
             temporal_extent=[time_coords_start, time_coords_end],
         )
 
-        # Create (or retrieve) a hemisphere collection within the catalog
-        hemisphere_collection = get_or_create_collection(
-            parent=main_collection,
-            collection_id=hemisphere,
-            title=f"Hemisphere Collection: {hemisphere.capitalize()}",
-            description=f"{hemisphere.capitalize()} hemisphere collection",
-            bbox=bbox,
-            temporal_extent=[time_coords_start, time_coords_end],
-        )
+        if not flat:
+            # Create (or retrieve) a hemisphere collection within the main collection
+            hemisphere_collection = get_or_create_collection(
+                parent=main_collection,
+                collection_id=hemisphere,
+                title=f"Hemisphere Collection: {hemisphere.capitalize()}",
+                description=f"{hemisphere.capitalize()} hemisphere collection",
+                bbox=bbox,
+                temporal_extent=[time_coords_start, time_coords_end],
+            )
 
         for time_idx, time_val in enumerate(time_coords):
             # Rearrange array dimension to match rioxarray expectation
@@ -158,15 +206,16 @@ def generate_cloud_tiff(
             forecast_reference_time_str_fmt = forecast_reference_time.strftime("%Y-%m-%d %H:%M")
             forecast_end_time = forecast_reference_time + relativedelta(**{leadtime_unit: leadtime - 1})
 
-            # Create (or retrieve) a forecast collection within the catalog
-            forecast_collection = get_or_create_collection(
-                parent=hemisphere_collection,
-                collection_id=f"{forecast_reference_date}",
-                title=f"Forecast Collection: {forecast_reference_date}",
-                description=f"Forecast data for {forecast_reference_date}",
-                bbox=bbox,
-                temporal_extent=[forecast_reference_time, forecast_end_time],
-            )
+            if not flat:
+                # Create (or retrieve) a forecast collection within the catalog
+                forecast_collection = get_or_create_collection(
+                    parent=hemisphere_collection,
+                    collection_id=f"{forecast_reference_date}",
+                    title=f"Forecast Collection: {forecast_reference_date}",
+                    description=f"Forecast data for {forecast_reference_date}",
+                    bbox=bbox,
+                    temporal_extent=[forecast_reference_time, forecast_end_time],
+                )
 
             # Create output dirs
             ncdf_dir = Path(ncdf_output_dir / f"{hemisphere}/{forecast_reference_date}")
@@ -175,12 +224,12 @@ def generate_cloud_tiff(
             cog_dir.mkdir(parents=True, exist_ok=True)
 
             # Save the forecast init slice as a netcdf file
-            item_id_nc = f"forecast_init_{forecast_reference_time_str}"
+            item_id_nc = f"{hemisphere}_forecast_init_{forecast_reference_time_str}"
             nc_path = ncdf_dir / f"{item_id_nc}.nc"
             encoding = {
                 var: {
                     "zlib": True,
-                    "complevel": 5,
+                    "complevel": 9,
                 } for var in ds_time_slice.data_vars
             }
             ds_time_slice.to_netcdf(
@@ -200,18 +249,21 @@ def generate_cloud_tiff(
                     "hemisphere": hemisphere,
                 },
             )
-
             # Add netCDF asset to item
             item.add_asset(
                 "netcdf",
                 Asset(
                     href=str(nc_path),
-                    media_type=pystac.MediaType.COG,
+                    media_type=pystac.MediaType.NETCDF,
                     title=f"netCDF for {forecast_reference_time_str_fmt}",
                     description=f"netCDF file container forecast variables for forecast initialised at: {forecast_reference_time_str_fmt}",
                     roles=["data"],
                 ),
             )
+            if flat:
+                main_collection.add_item(item)
+            else:
+                forecast_collection.add_item(item)
 
             # Process each leadtime
             for i in (pbar := tqdm(range(leadtime), desc="COGifying files", leave=True)):
@@ -225,7 +277,7 @@ def generate_cloud_tiff(
                 valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
 
                 # Add STAC Item for this file
-                item_id_cog = f"forecast_init_{forecast_reference_time_str}_lead_{valid_time_str}"
+                item_id_cog = f"{hemisphere}_forecast_init_{forecast_reference_time_str}_lead_{valid_time_str}"
                 item = Item(
                     id=item_id_cog,
                     geometry=geometry,
@@ -243,8 +295,24 @@ def generate_cloud_tiff(
                 proj = ProjectionExtension.ext(item)
                 proj.code = crs
 
+                if flat:
+                    # Add netCDF asset to item
+                    item.add_asset(
+                        "netcdf",
+                        Asset(
+                            href=str(nc_path),
+                            media_type=pystac.MediaType.NETCDF,
+                            title=f"netCDF for {forecast_reference_time_str_fmt}",
+                            description=f"netCDF file container forecast variables for forecast initialised at: {forecast_reference_time_str_fmt}",
+                            roles=["data"],
+                        ),
+                    )
+
                 # Add item to collection
-                forecast_collection.add_item(item)
+                if flat:
+                    main_collection.add_item(item)
+                else:
+                    forecast_collection.add_item(item)
 
                 # Save each variable as separate COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
                 for var_name in valid_bands:
@@ -293,16 +361,33 @@ def generate_cloud_tiff(
                         Asset(
                             href=str(thumbnail_path),
                             media_type=pystac.MediaType.JPEG,
-                            title=f"{var_name.capitalize()} Thumbnail",
+                            title=f"{var_name} Thumbnail",
                             roles=["thumbnail"],
                         ),
                     )
 
         # Save catalog and collections
-        catalog.normalize_hrefs(
-            str(stac_output_dir),
-        )
+
+        ## Normalize HREFs for the catalog and save
+        catalog.normalize_hrefs(str(stac_output_dir))
+
+        ## Replace file path prefix in "href" with URL base
+        if FILE_SERVER_URL:
+            if not FILE_SERVER_URL.endswith("/"):
+                FILE_SERVER_URL += "/"
+
+            for item in catalog.get_all_items():
+                for asset_key, asset in item.assets.items():
+                    # Replace relative file path with URL
+                    if asset.href.startswith("./"):
+                        asset.href = FILE_SERVER_URL + asset.href.lstrip("./")
+
         catalog.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)
+
+        if not flat:
+            logger.warning(
+                "Run without `-f`/`--flat` flag, this is not supported for ingestion into pgSTAC database, only stac-browser"
+            )
 
     return
 
@@ -319,6 +404,7 @@ def main(args: SimpleNamespace):
             input (List[str]): List of input netCDF files or directories (positional argument).
             --compress (bool): Whether to compress the output COG files.
             --overwrite (bool): Whether to overwrite existing COG files.
+            --flat (bool): Whether to generate a flat STAC catalog for pgSTAC.
 
     Raises:
         FileNotFoundError: If no valid netCDF files are found for processing.
@@ -366,4 +452,5 @@ def main(args: SimpleNamespace):
             compress=args.no_compress,
             overwrite=args.overwrite,
             forecast_frequency=args.forecast_frequency,
+            flat=args.flat,
         )

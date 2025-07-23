@@ -38,6 +38,11 @@
           "level": "DEBUG",
           "propagate": false,
           "handlers": ["rich_handler"]
+        },
+        "icenet_dashboard_preprocessor": {
+          "level": "DEBUG",
+          "propagate": false,
+          "handlers": ["rich_handler"]
         }
     }
 }

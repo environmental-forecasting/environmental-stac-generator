@@ -17,11 +17,13 @@ classifiers = [
 ]
 license = {text = "MIT license"}
 dependencies = [
+    "deepdiff",
     "python-dateutil",
     "matplotlib",
     "numpy",
     "prompt_toolkit==3.0.36",
     "pystac",
+    "python-dotenv",
     "ipython==8.18.0",
     "rich[jupyter]",
     "rioxarray",

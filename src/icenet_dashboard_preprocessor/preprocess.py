@@ -24,6 +24,7 @@ from .utils import (
     get_hemisphere,
     get_nc_files,
     parse_forecast_frequency,
+    proj_to_geo,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ def get_or_create_catalog(catalog_file: Path, catalog_defs: dict) -> Catalog:
     )
 
 
-def get_or_create_collection(parent, collection_id, title, description, bbox, temporal_extent) -> Collection:
+def get_or_create_collection(parent, collection_id, title, description, bbox, temporal_extent, license="other") -> Collection:
     collection = next((c for c in parent.get_children() if c.id == collection_id), None)
     if not collection:
         collection = Collection(
@@ -145,12 +146,6 @@ def generate_cloud_tiff(
         if ds.coords[x_coord].attrs.get("units", None) in ["1000 meter", "km"]:
             ds = ds.assign_coords({x_coord: ds.coords[x_coord] * 1000})
 
-        # Compute bounding box and geometry from coordinates
-        x_min, x_max = float(ds[x_coord].min()), float(ds[x_coord].max())
-        y_min, y_max = float(ds[y_coord].min()), float(ds[y_coord].max())
-        bbox = [x_min, y_min, x_max, y_max]
-        geometry = mapping(box(*bbox)) # type: ignore
-
         # Filter 4D variables - these are variables of interest for COGs
         # Assuming other vars shouldn't be converted to COGs
         valid_bands = [
@@ -171,6 +166,16 @@ def generate_cloud_tiff(
         nc_attrs = ds.attrs
         crs = nc_attrs["geospatial_bounds_crs"]
         ds.rio.write_crs(crs, inplace=True)
+
+        # Compute bounding box and geometry from coordinates
+        x_min, x_max = float(ds[x_coord].min()), float(ds[x_coord].max())
+        y_min, y_max = float(ds[y_coord].min()), float(ds[y_coord].max())
+        bbox = [x_min, y_min, x_max, y_max]
+
+        # If projected CRS, convert to WGS84
+        if crs not in ["EPSG:4326", "4326"]:
+            bbox = proj_to_geo(bbox_projected=bbox, src_crs=crs)
+        geometry = mapping(box(*bbox)) # type: ignore
 
         # Get temporal extent range from input netCDF
         time_coords_start = pd.to_datetime(time_coords.isel(time=0).values)
@@ -248,8 +253,8 @@ def generate_cloud_tiff(
                 bbox=bbox,
                 datetime=forecast_reference_time,
                 properties={
-                    "forecast_reference_time": str(forecast_reference_time),
-                    "hemisphere": hemisphere,
+                    "forecast:reference_time": forecast_reference_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    "custom:hemisphere": hemisphere,
                 },
             )
             # Add netCDF asset to item
@@ -287,9 +292,10 @@ def generate_cloud_tiff(
                     bbox=bbox,
                     datetime=valid_time,
                     properties={
-                        "forecast_reference_time": str(forecast_reference_time),
-                        "hemisphere": hemisphere,
-                        "leadtime": i,
+                        "forecast:reference_time": forecast_reference_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                        "forecast:lead_time": "P1D",
+                        "custom:hemisphere": hemisphere,
+                        "custom:leadtime": i,
                     },
                 )
 

@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 
 import xarray as xr
+from rasterio.crs import CRS
+from rasterio.warp import transform_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -147,3 +149,11 @@ def parse_forecast_frequency(forecast_frequency: str) -> (float, str):
         return float(value), unit
     else:
         raise ValueError(f"Invalid leadtime format: {forecast_frequency}")
+
+
+def proj_to_geo(bbox_projected: list[float], src_crs: str) -> list[float]:
+    """Convert a projection to geographic coordinates"""
+
+    bbox = transform_bounds(src_crs, CRS.from_epsg(4326), *bbox_projected)  # type: ignore
+
+    return bbox

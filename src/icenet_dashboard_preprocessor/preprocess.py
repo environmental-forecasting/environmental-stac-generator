@@ -47,6 +47,7 @@ def get_or_create_collection(parent, collection_id, title, description, bbox, te
             id=collection_id,
             title=title,
             description=description,
+            license=license,
             extent=pystac.Extent(
                 pystac.SpatialExtent([bbox]),
                 pystac.TemporalExtent([temporal_extent]),
@@ -63,7 +64,6 @@ def generate_cloud_tiff(
     overwrite: bool = False,
     forecast_frequency: str = "1days",
     flat: bool = False,
-    url_base: str | None = None,
 ) -> None:
     """Generates Cloud Optimized GeoTIFFs and STAC Catalogs from IceNet prediction netCDF files.
 
@@ -79,11 +79,13 @@ def generate_cloud_tiff(
         flat (optional): Whether to generate a flat STAC catalog for pgSTAC.
                     Default is False.
     """
+    # Config
     compress_method = "DEFLATE" if compress else "NONE"
     data_path = Path("data")
     ncdf_output_dir = data_path / "netcdf" / name
     cogs_output_dir = data_path / "cogs" / name
     config_output_path = data_path / "config.json"
+    license = "OGL-UK-3.0"  # Ref: https://spdx.org/licenses/
 
     # Store input options to file
     config_data = {
@@ -181,6 +183,7 @@ def generate_cloud_tiff(
             title=f"Model Collection: {name}",
             description=f"{name} collection",
             bbox=bbox,
+            license=license,
             temporal_extent=[time_coords_start, time_coords_end],
         )
 

@@ -293,7 +293,7 @@ def generate_cloud_tiff(
                     datetime=valid_time,
                     properties={
                         "forecast:reference_time": forecast_reference_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                        "forecast:lead_time": "P1D",
+                        # "forecast:lead_time": "P1D",
                         "custom:hemisphere": hemisphere,
                         "custom:leadtime": i,
                     },
@@ -323,57 +323,70 @@ def generate_cloud_tiff(
                 else:
                     forecast_collection.add_item(item)
 
-                # Save each variable as separate COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
+                # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
+                da_list = []
+                band_names = []
                 for var_name in valid_bands:
                     da_variable = ds_leadtime_slice[var_name]
-                    cog_path = cog_dir / f"{item_id_cog}_{var_name}.tif"
-                    thumbnail_path = cog_dir / f"{item_id_cog}_{var_name}.jpg"
-                    if cog_path.exists() and not overwrite:
-                        pbar.set_description(f"File already exists, skipping: {cog_path}")
-                        continue
-                    else:
-                        pbar.set_description(f"Saving to COG: {cog_path}")
-
-                    # Add metadata to extracted variable so `to_raster` includes them in the output GeoTIFF
                     da_variable.rio.write_crs(crs, inplace=True)
                     da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
-                    # da_variable.rio.to_raster(cog_path, driver="COG", compress=compress_method)
-                    write_cog(cog_path, da_variable, compress=compress_method)
+                    da_list.append(da_variable)
+                    band_names.append(var_name)
 
-                    # Add COG asset to item
-                    item.add_asset(
-                        f"{var_name}",
-                        Asset(
-                            href=str(cog_path),
-                            media_type=pystac.MediaType.COG,
-                            title=f"{var_name} at {valid_time_str_fmt}",
-                            description=ds[var_name].long_name or None,
-                            roles=["data"],
-                            extra_fields={
-                                "variable": var_name
-                            },
-                        ),
-                    )
+                # Stack variables as a single dataset
+                da_multiband = xr.concat(da_list, dim="band")
+                da_multiband = da_multiband.assign_coords(band=("band", band_names))
 
-                    # Create a thumbnail plot of the variable
-                    fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
-                    da_variable.plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
-                    plt.axis('off')
-                    plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
-                    plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
-                    plt.close(fig)
+                # Define cog/thumbnail output paths
+                cog_path = cog_dir / f"{item_id_cog}.tif"
+                thumbnail_path = cog_dir / f"{item_id_cog}.jpg"
 
-                    # Add thumbnail asset to item
-                    # Some STAC tools may only show the first thumbnail asset
-                    item.add_asset(
-                        f"thumbnail_{var_name}",
-                        Asset(
-                            href=str(thumbnail_path),
-                            media_type=pystac.MediaType.JPEG,
-                            title=f"{var_name} Thumbnail",
-                            roles=["thumbnail"],
-                        ),
-                    )
+                if cog_path.exists() and not overwrite:
+                    pbar.set_description(f"File already exists, skipping: {cog_path}")
+                    continue
+                else:
+                    pbar.set_description(f"Saving all variables to on multi-band COG: {cog_path}")
+
+                # Add metadata to extracted variable so `to_raster` includes them in the output GeoTIFF
+                da_multiband.rio.write_crs(crs, inplace=True)
+                da_multiband.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+                # da_multiband.rio.to_raster(cog_path, driver="COG", compress=compress_method)
+                write_cog(cog_path, da_multiband, compress=compress_method)
+
+                # Add COG asset to item
+                item.add_asset(
+                    "multiband_data",
+                    Asset(
+                        href=str(cog_path),
+                        media_type=pystac.MediaType.COG,
+                        title=f"Multi-band COG at {valid_time_str_fmt}",
+                        description=f"Variables: {', '.join(band_names)}",
+                        roles=["data"],
+                        extra_fields={
+                            "bands": [{"name": name} for name in band_names]
+                        },
+                    ),
+                )
+
+                # Create a thumbnail plot of the variable
+                fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
+                da_multiband.sel(band=band_names[0]).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
+                plt.axis('off')
+                plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
+                plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
+                plt.close(fig)
+
+                # Add thumbnail asset to item
+                # Some STAC tools may only show the first thumbnail asset
+                item.add_asset(
+                    "thumbnail",
+                    Asset(
+                        href=str(thumbnail_path),
+                        media_type=pystac.MediaType.JPEG,
+                        title="Thumbnail",
+                        roles=["thumbnail"],
+                    ),
+                )
 
         # Save catalog and collections
 

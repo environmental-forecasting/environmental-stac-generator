@@ -1,8 +1,10 @@
+import subprocess
 from pathlib import Path
+
 import xarray as xr
 
+
 def write_cog(cog_path: Path, da: xr.DataArray, compress: str = "DEFLATE") -> None:
-    import subprocess
     tmp_cog_path = cog_path.with_name(cog_path.stem + ".tmp.tif")
 
     # Convert xr.DataArray to GeoTIFF using rioxarray

@@ -213,6 +213,7 @@ def generate_cloud_tiff(
             forecast_reference_time_str = forecast_reference_time.strftime("%Y%m%d_%H%M")
             forecast_reference_time_str_fmt = forecast_reference_time.strftime("%Y-%m-%d %H:%M")
             forecast_end_time = forecast_reference_time + relativedelta(**{leadtime_unit: leadtime - 1})
+            forecast_end_time_str_fmt = forecast_end_time.strftime("%Y-%m-%d %H:%M")
 
             if not flat:
                 # Create (or retrieve) a forecast collection within the catalog
@@ -231,9 +232,10 @@ def generate_cloud_tiff(
             cog_dir = Path(cogs_output_dir / f"{hemisphere}/{forecast_reference_date}")
             cog_dir.mkdir(parents=True, exist_ok=True)
 
+            item_id = f"{hemisphere}_forecast_init_{forecast_reference_time_str}"
+
             # Save the forecast init slice as a netcdf file
-            item_id_nc = f"{hemisphere}_forecast_init_{forecast_reference_time_str}"
-            nc_path = ncdf_dir / f"{item_id_nc}.nc"
+            nc_path = ncdf_dir / f"{item_id}.nc"
             encoding = {
                 var: {
                     "zlib": True,
@@ -248,12 +250,13 @@ def generate_cloud_tiff(
 
             # Add STAC Item for this netCDF file
             item = Item(
-                id=item_id_nc,
+                id=item_id,
                 geometry=geometry,
                 bbox=bbox,
                 datetime=forecast_reference_time,
                 properties={
                     "forecast:reference_time": forecast_reference_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    "forecast:end_time": forecast_end_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
                     "custom:hemisphere": hemisphere,
                 },
             )
@@ -263,7 +266,7 @@ def generate_cloud_tiff(
                 Asset(
                     href=str(nc_path),
                     media_type=pystac.MediaType.NETCDF,
-                    title=f"netCDF for {forecast_reference_time_str_fmt}",
+                    title=f"Forecast -> netCDF from {forecast_reference_time_str_fmt}",
                     description=f"netCDF file container forecast variables for forecast initialised at: {forecast_reference_time_str_fmt}",
                     roles=["data"],
                 ),
@@ -284,38 +287,10 @@ def generate_cloud_tiff(
                 valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
                 valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
 
-                # Add STAC Item for this file
-                item_id_cog = f"{hemisphere}_forecast_init_{forecast_reference_time_str}_lead_{valid_time_str}"
-                item = Item(
-                    id=item_id_cog,
-                    geometry=geometry,
-                    bbox=bbox,
-                    datetime=valid_time,
-                    properties={
-                        "forecast:reference_time": forecast_reference_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                        # "forecast:lead_time": "P1D",
-                        "custom:hemisphere": hemisphere,
-                        "custom:leadtime": i,
-                    },
-                )
-
                 # Add projection extension
                 ProjectionExtension.add_to(item)
                 proj = ProjectionExtension.ext(item)
                 proj.code = crs
-
-                if flat:
-                    # Add netCDF asset to item
-                    item.add_asset(
-                        "netcdf",
-                        Asset(
-                            href=str(nc_path),
-                            media_type=pystac.MediaType.NETCDF,
-                            title=f"netCDF for {forecast_reference_time_str_fmt}",
-                            description=f"netCDF file container forecast variables for forecast initialised at: {forecast_reference_time_str_fmt}",
-                            roles=["data"],
-                        ),
-                    )
 
                 # Add item to collection
                 if flat:
@@ -337,6 +312,9 @@ def generate_cloud_tiff(
                 da_multiband = xr.concat(da_list, dim="band")
                 da_multiband = da_multiband.assign_coords(band=("band", band_names))
 
+                # Add STAC Item for this file
+                item_id_cog = f"{item_id}_lead_{valid_time_str}"
+
                 # Define cog/thumbnail output paths
                 cog_path = cog_dir / f"{item_id_cog}.tif"
                 thumbnail_path = cog_dir / f"{item_id_cog}.jpg"
@@ -355,38 +333,41 @@ def generate_cloud_tiff(
 
                 # Add COG asset to item
                 item.add_asset(
-                    "multiband_data",
-                    Asset(
+                    key=valid_time_str_fmt,
+                    asset=Asset(
                         href=str(cog_path),
                         media_type=pystac.MediaType.COG,
-                        title=f"Multi-band COG at {valid_time_str_fmt}",
+                        title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
                         description=f"Variables: {', '.join(band_names)}",
                         roles=["data"],
                         extra_fields={
-                            "bands": [{"name": name} for name in band_names]
+                            "forecast:bands": [{"name": name} for name in band_names],
+                            "custom:leadtime": i,
+                            "custom:valid_time": valid_time_str,
                         },
                     ),
                 )
 
-                # Create a thumbnail plot of the variable
-                fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
-                da_multiband.sel(band=band_names[0]).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
-                plt.axis('off')
-                plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
-                plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
-                plt.close(fig)
+                # Create a thumbnail plot of the first variable for the first leadtime
+                if i == 0:
+                    fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
+                    da_multiband.sel(band=band_names[0]).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
+                    plt.axis('off')
+                    plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
+                    plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
+                    plt.close(fig)
 
-                # Add thumbnail asset to item
-                # Some STAC tools may only show the first thumbnail asset
-                item.add_asset(
-                    "thumbnail",
-                    Asset(
-                        href=str(thumbnail_path),
-                        media_type=pystac.MediaType.JPEG,
-                        title="Thumbnail",
-                        roles=["thumbnail"],
-                    ),
-                )
+                    # Add thumbnail asset to item
+                    # Some STAC tools may only show the first thumbnail asset
+                    item.add_asset(
+                        "thumbnail",
+                        Asset(
+                            href=str(thumbnail_path),
+                            media_type=pystac.MediaType.JPEG,
+                            title="Thumbnail",
+                            roles=["thumbnail"],
+                        ),
+                    )
 
         # Save catalog and collections
 

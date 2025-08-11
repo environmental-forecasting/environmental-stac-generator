@@ -360,7 +360,7 @@ class STACGenerator(BaseSTAC):
         # Get input time delta options to compute forecast times
         leadtime_step, leadtime_unit = parse_forecast_frequency(forecast_frequency)
 
-        catalog = self._stac_catalog
+        catalog = self.catalog
 
         # Get required coords and metadata from forecast netCDF file
         crs, bbox, geometry, valid_bands, x_coord, y_coord, time_coords, time_coords_start, time_coords_end, leadtime_coords = self.get_forecast_info(nc_file)
@@ -539,23 +539,7 @@ class STACGenerator(BaseSTAC):
         ds.close()
 
         # Save catalog and collections
-
-        ## Normalize HREFs for the catalog and save
-        catalog.normalize_hrefs(str(self._stac_output_dir))
-
-        ## Replace file path prefix in "href" with URL base
-        FILE_SERVER_URL = self._FILE_SERVER_URL
-        if FILE_SERVER_URL:
-            if not FILE_SERVER_URL.endswith("/"):
-                FILE_SERVER_URL += "/"
-
-            for item in catalog.get_all_items():
-                for asset_key, asset in item.assets.items():
-                    # Replace relative file path with URL
-                    if asset.href.startswith("./"):
-                        asset.href = FILE_SERVER_URL + asset.href.lstrip("./")
-
-        catalog.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)
+        self.save_catalog()
 
         if not flat:
             logger.warning(
@@ -590,3 +574,22 @@ class STACGenerator(BaseSTAC):
         plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time}")
         plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
         plt.close(fig)
+
+    def save_catalog(self):
+        catalog = self.catalog
+        ## Normalize HREFs for the catalog and save
+        catalog.normalize_hrefs(str(self._stac_output_dir))
+
+        ## Replace file path prefix in "href" with URL base
+        FILE_SERVER_URL = self._FILE_SERVER_URL
+        if FILE_SERVER_URL:
+            if not FILE_SERVER_URL.endswith("/"):
+                FILE_SERVER_URL += "/"
+
+            for item in catalog.get_all_items():
+                for asset_key, asset in item.assets.items():
+                    # Replace relative file path with URL
+                    if asset.href.startswith("./"):
+                        asset.href = FILE_SERVER_URL + asset.href.lstrip("./")
+
+        catalog.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)

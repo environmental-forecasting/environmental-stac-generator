@@ -465,7 +465,7 @@ class STACGenerator(BaseSTAC):
             else:
                 forecast_collection.add_item(item)
 
-            args = (
+            process_args = (
                 forecast_reference_time,
                 leadtime_unit,
                 leadtime_step,
@@ -481,28 +481,20 @@ class STACGenerator(BaseSTAC):
             )
 
             # Process each leadtime
-            if workers == 1:
-                for i in (pbar := tqdm(range(leadtime), desc="COGifying files", leave=True)):
-                    cog_file, assets, pbar_description = self._process_leadtime(i, *args)
-                    pbar.set_description(pbar_description)
-                    for asset in assets:
-                        item.add_asset(key=asset["key"], asset=asset["asset"])
-            else:
-                with ProcessPoolExecutor(max_workers=workers) as executor:
-                    with tqdm(total=leadtime, desc="COGifying files", leave=True) as pbar:
-                        futures = []
-                        for i in range(leadtime):
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                with tqdm(total=leadtime, desc="COGifying files", leave=True) as pbar:
+                    futures = []
+                    for i in range(leadtime):
+                        future = executor.submit(self._process_leadtime, i, *process_args)
+                        future.add_done_callback(lambda _: pbar.update(1))
+                        futures.append(future)
 
-                            future = executor.submit(self._process_leadtime, i, *args)
-                            future.add_done_callback(lambda _: pbar.update(1))
-                            futures.append(future)
-
-                        # Wait for all futures to complete
-                        for future in futures:
-                            cog_file, assets, pbar_description = future.result()
-                            pbar.set_description(pbar_description)
-                            for asset in assets:
-                                item.add_asset(key=asset["key"], asset=asset["asset"])
+                    # Wait for all futures to complete
+                    for future in futures:
+                        cog_file, assets, pbar_description = future.result()
+                        pbar.set_description(pbar_description)
+                        for asset in assets:
+                            item.add_asset(key=asset["key"], asset=asset["asset"])
 
         ds.close()
 

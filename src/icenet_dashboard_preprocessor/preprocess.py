@@ -77,4 +77,5 @@ def main(args: SimpleNamespace):
             overwrite=args.overwrite,
             forecast_frequency=args.forecast_frequency,
             flat=args.flat,
+            stac_only=args.stac_only,
         )

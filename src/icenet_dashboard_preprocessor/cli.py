@@ -35,6 +35,12 @@ def preprocess(
         "--flat",
         help="Flatten the STAC JSON output for pgSTAC compatibility (default is not flat)",
     ),
+    stac_only: bool = typer.Option(
+        False,
+        "-s",
+        "--stac-only",
+        help="Output only the STAC files, not COGs/Thumbnails (default is not enabled)",
+    ),
 ):
     print("Command:", " ".join(sys.argv))
     args = SimpleNamespace(
@@ -44,6 +50,7 @@ def preprocess(
         overwrite=overwrite,
         no_compress=no_compress,
         flat=flat,
+        stac_only=stac_only,
     )
     preprocess_main(args)
 

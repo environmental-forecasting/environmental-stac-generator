@@ -343,6 +343,7 @@ class STACGenerator(BaseSTAC):
         compress: bool = True,
         overwrite: bool = False,
         flat: bool = False,
+        stac_only: bool = False,
     ):
         self._collection_name = name
         self._forecast_frequency = forecast_frequency
@@ -421,7 +422,10 @@ class STACGenerator(BaseSTAC):
 
             # Save the forecast init slice as a netcdf file
             out_nc_file = ncdf_dir / f"{item_id}.nc"
-            self._write_netcdf(ds_time_slice, out_nc_file)
+
+            # Write the netCDF file in addition to the STAC json output
+            if not stac_only:
+                self._write_netcdf(ds_time_slice, out_nc_file)
 
             # Add STAC Item for this netCDF file
             item = Item(
@@ -468,71 +472,70 @@ class STACGenerator(BaseSTAC):
                 valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
                 valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
 
-                # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
-                da_list = []
-                band_names = []
-                for var_name in valid_bands:
-                    da_variable = ds_leadtime_slice[var_name]
-                    da_variable.rio.write_crs(crs, inplace=True)
-                    da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
-                    da_list.append(da_variable)
-                    band_names.append(var_name)
-
-                # Stack variables as a single dataset
-                da_multiband = xr.concat(da_list, dim="band")
-                da_multiband = da_multiband.assign_coords(band=("band", band_names))
-
                 # Add STAC Item for this file
                 item_id_cog = f"{item_id}_lead_{valid_time_str}"
 
                 # Define cog/thumbnail output paths
-                cog_path = cog_dir / f"{item_id_cog}.tif"
-                thumbnail_path = cog_dir / f"{item_id_cog}.jpg"
+                cog_file = cog_dir / f"{item_id_cog}.tif"
+                thumbnail_file = cog_dir / f"{item_id_cog}.jpg"
 
-                if cog_path.exists() and not overwrite:
-                    pbar.set_description(f"File already exists, skipping: {cog_path}")
-                    continue
+                # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
+                da_list = []
+                band_names = valid_bands
+                for var_name in band_names:
+                    da_variable = ds_leadtime_slice[var_name]
+                    da_variable.rio.write_crs(crs, inplace=True)
+                    da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+                    da_list.append(da_variable)
+
+                if not stac_only:
+                    # Stack variables as a single dataset
+                    da_multiband = xr.concat(da_list, dim="band")
+                    da_multiband = da_multiband.assign_coords(band=("band", band_names))
+
+                    if cog_file.exists() and not overwrite:
+                        pbar.set_description(f"File already exists, skipping: {cog_file}")
+                        continue
+                    else:
+                        pbar.set_description(f"Saving all variables to multi-band COG: {cog_file}")
+                    self._write_cog(da_multiband, x_coord, y_coord, crs, cog_file)
+
+                    # Create thumbnail plot for only the first variable for the first leadtime
+                    if i == 0:
+                        self._create_and_write_thumbnail(da_multiband, thumbnail_file, forecast_reference_time, valid_time)
                 else:
-                    pbar.set_description(f"Saving all variables to on multi-band COG: {cog_path}")
+                    pbar.set_description(f"Processing STAC: {item_id_cog}")
 
-                # Add metadata to extracted variable so `to_raster` includes them in the output GeoTIFF
-                da_multiband.rio.write_crs(crs, inplace=True)
-                da_multiband.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
-                # da_multiband.rio.to_raster(cog_path, driver="COG", compress=self._compress_method)
-                write_cog(cog_path, da_multiband, compress=self._compress_method)
-
-                # Add COG asset to item
-                item.add_asset(
-                    key=valid_time_str_fmt,
-                    asset=Asset(
-                        href=str(cog_path),
-                        media_type=pystac.MediaType.COG,
-                        title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
-                        description=f"Variables: {', '.join(band_names)}",
-                        roles=["data"],
-                        extra_fields={
-                            "forecast:bands": [{"name": name} for name in band_names],
-                            "custom:leadtime": i,
-                            "custom:valid_time": valid_time_str,
-                        },
-                    ),
-                )
-
-                # Create a thumbnail plot of the first variable for the first leadtime
-                if i == 0:
-                    self._create_thumbnail(da_multiband, thumbnail_path, forecast_reference_time, valid_time)
-
-                    # Add thumbnail asset to item
-                    # Some STAC tools may only show the first thumbnail asset
+                    # Add COG asset to item
                     item.add_asset(
-                        "thumbnail",
-                        Asset(
-                            href=str(thumbnail_path),
-                            media_type=pystac.MediaType.JPEG,
-                            title="Thumbnail",
-                            roles=["thumbnail"],
+                        key=valid_time_str_fmt,
+                        asset=Asset(
+                            href=str(cog_file),
+                            media_type=pystac.MediaType.COG,
+                            title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
+                            description=f"Variables: {', '.join(band_names)}",
+                            roles=["data"],
+                            extra_fields={
+                                "forecast:bands": [{"name": name} for name in band_names],
+                                "custom:leadtime": i,
+                                "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                            },
                         ),
                     )
+
+                    # Create a thumbnail plot of the first variable for the first leadtime
+                    if i == 0:
+                        # Add thumbnail asset to item
+                        # Some STAC tools may only show the first thumbnail asset
+                        item.add_asset(
+                            "thumbnail",
+                            Asset(
+                                href=str(thumbnail_file),
+                                media_type=pystac.MediaType.JPEG,
+                                title="Thumbnail",
+                                roles=["thumbnail"],
+                            ),
+                        )
         ds.close()
 
         # Save catalog and collections
@@ -572,7 +575,14 @@ class STACGenerator(BaseSTAC):
             encoding=encoding,
         )
 
-    def _create_thumbnail(self, da_multiband: xr.DataArray, thumbnail_path, forecast_reference_time, valid_time):
+    def _write_cog(self, da_multiband, x_coord, y_coord, crs, cog_file: Path):
+        # Add metadata to extracted variable so `to_raster` includes them in the output GeoTIFF
+        da_multiband.rio.write_crs(crs, inplace=True)
+        da_multiband.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+        # da_multiband.rio.to_raster(cog_path, driver="COG", compress=self._compress_method)
+        write_cog(cog_file, da_multiband, compress=self._compress_method)
+
+    def _create_and_write_thumbnail(self, da_multiband: xr.DataArray, thumbnail_path, forecast_reference_time, valid_time):
         fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
         # da_multiband.sel(band=band_names[0]).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
         da_multiband.isel(band=0).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore

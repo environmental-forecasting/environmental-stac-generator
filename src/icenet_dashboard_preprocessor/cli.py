@@ -18,7 +18,7 @@ def preprocess(
         ..., help="Input file, directory or wildcard pattern"
     ),
     name: str = typer.Option(
-        "icenet", "-n", "--name", help="Collection name"
+        "default", "-n", "--name", help="Collection name"
     ),
     overwrite: bool = typer.Option(
         False, "-o", "--overwrite", help="Overwrite existing COGs"

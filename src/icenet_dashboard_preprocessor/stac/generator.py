@@ -253,7 +253,7 @@ class STACGenerator(BaseSTAC):
         config_data = {
             self._collection_name: {
                 "forecast_frequency": self._forecast_frequency,
-                "flat": self._flat,
+                "not_flat": self._not_flat,
             }
         }
         self._store_config(config_data)
@@ -344,14 +344,14 @@ class STACGenerator(BaseSTAC):
         forecast_frequency: str = "1days",
         compress: bool = True,
         overwrite: bool = False,
-        flat: bool = False,
+        not_flat: bool = True,
         stac_only: bool = False,
         workers: int = 1,
     ):
         self._collection_name = name
         self._forecast_frequency = forecast_frequency
         self._compress_method = "DEFLATE" if compress else "NONE"
-        self._flat = flat
+        self._not_flat = not_flat
         nc_file = Path(nc_file).resolve()
         hemisphere = get_hemisphere(nc_file)
 
@@ -380,7 +380,7 @@ class STACGenerator(BaseSTAC):
             temporal_extent=[time_coords_start, time_coords_end],
         )
 
-        if not flat:
+        if not_flat:
             # Create (or retrieve) a hemisphere collection within the main collection
             hemisphere_collection = self.get_or_create_collection(
                 parent=main_collection,
@@ -403,7 +403,7 @@ class STACGenerator(BaseSTAC):
             forecast_end_time = forecast_reference_time + relativedelta(**{leadtime_unit: leadtime - 1})
             forecast_end_time_str_fmt = forecast_end_time.strftime("%Y-%m-%d %H:%M")
 
-            if not flat:
+            if not_flat:
                 # Create (or retrieve) a forecast collection within the catalog
                 forecast_collection = self.get_or_create_collection(
                     parent=hemisphere_collection,
@@ -460,10 +460,10 @@ class STACGenerator(BaseSTAC):
                     roles=["data"],
                 ),
             )
-            if flat:
-                main_collection.add_item(item)
-            else:
+            if not_flat:
                 forecast_collection.add_item(item)
+            else:
+                main_collection.add_item(item)
 
             process_args = (
                 forecast_reference_time,
@@ -501,9 +501,9 @@ class STACGenerator(BaseSTAC):
         # Save catalog and collections
         self.save_catalog()
 
-        if not flat:
-            logger.warning(
-                "Run without `-f`/`--flat` flag, this is not supported for ingestion into pgSTAC database, only stac-browser"
+        if not_flat:
+            DeprecationWarning(
+                "Run with `-nf`/`--not-flat` flag, this is not supported for ingestion into pgSTAC database, only stac-browser"
             )
 
     def _process_leadtime(self, i, forecast_reference_time, leadtime_unit, leadtime_step, ds_time_slice, x_coord, y_coord, crs, cog_dir, stac_only, item, valid_bands, overwrite):

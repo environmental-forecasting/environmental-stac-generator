@@ -38,9 +38,16 @@ class BaseSTAC:
     ):
         """
         Initialises the BaseSTAC class with a path to an existing STAC catalog.
+
         Args:
-            stac_catalog_path (str|Path): The path to the STAC catalog.
-                If the path does not exist, a new catalog will be created at this location.
+            data_path (optional): The path to the directory containing input files used to generate the STAC catalog.
+                Defaults to `data/` if not provided.
+            catalog_defs (optional): Dictionary of metadata for the root STAC catalog.
+                If not provided, defaults to a standard BAS environmental forecast catalog definition.
+            stac_catalog_file (optional): The path where the generated STAC catalog JSON file should be saved.
+                If not provided, it will be created based on the data_path or other internal logic.
+            license (optional): SPDX license identifier for the items in the STAC catalog.
+                Defaults to `"OGL-UK-3.0"` if not provided.
         """
         if not catalog_defs:
             catalog_defs = {
@@ -49,11 +56,11 @@ class BaseSTAC:
                     "title": "BAS Environmental Forecasting STAC Catalog",
             }
 
-        self._data_path = Path("data")
+        self._data_path = data_path
         self._license = license if license else "OGL-UK-3.0"   # Ref: https://spdx.org/licenses/
 
         self._load_dotenv()
-        self._set_catalog_path()
+        self._set_catalog_path(stac_catalog_file=stac_catalog_file)
         self.get_or_create_catalog(catalog_defs=catalog_defs)
 
     def _load_dotenv(self) -> None:

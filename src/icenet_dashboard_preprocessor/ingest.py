@@ -1,6 +1,5 @@
 import logging
 import os
-from types import SimpleNamespace
 
 from dotenv import load_dotenv
 
@@ -9,22 +8,27 @@ from .stac.dataloader import PGSTACDataLoader
 logger = logging.getLogger(__name__)
 
 
-def main(args: SimpleNamespace):
+def main(catalog: str) -> None:
     """
-    Main function to ingest pre-generated STAC catalogs into PostGIS database.
+    Main function to ingest pre-generated STAC catalogs into pgSTAC database.
 
-    This function ingests JSON STAC catalogs into the PostGIS database.
+    Loads a JSON STAC catalog file using the `PGSTACDataLoader`, which communicates
+    with a running instance of [stac-fastapi](https://github.com/stac-utils/stac-fastapi)
+    (e.g., pgSTAC), to ingest the catalog into a PostgreSQL/PostGIS database.
 
     Args:
-        args: Parsed Command line arguments. The expected keys are:
-            input (List[str]): List of STAC catalog/collection/item JSON files or directories w/ them.
-            --overwrite (bool): Whether to overwrite existing database entry matches.
+        catalog: Path to the JSON STAC catalog file to be ingested.
 
     Raises:
         FileNotFoundError: If no valid JSON files are found for ingestion.
 
     Returns:
         None
+
+    Raises:
+        ValueError: If the `STAC_FASTAPI_URL` environment variable is not set.
+        ConnectionError: If the STAC API is unreachable or unresponsive.
+        Exception: Any exception raised by the underlying `PGSTACDataLoader`.
 
     Examples:
         >>> dashboard ingest data/stac/catalog.json
@@ -45,4 +49,4 @@ def main(args: SimpleNamespace):
         return
 
     # Actually load the STAC metadata into PgSTAC database
-    loader.load_stac_catalog(catalog_file=args.catalog)
+    loader.load_stac_catalog(catalog_file=catalog)

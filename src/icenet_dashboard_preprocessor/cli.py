@@ -1,5 +1,5 @@
 import sys
-from types import SimpleNamespace
+import logging
 
 import typer
 
@@ -8,6 +8,7 @@ from .preprocess import main as preprocess_main
 
 app = typer.Typer()
 
+logger = logging.getLogger(__name__)
 
 @app.command(help="Generate COGs and generate static JSON STAC catalog.")
 def preprocess(
@@ -45,29 +46,27 @@ def preprocess(
         help="Output only the STAC files, not COGs/Thumbnails (default is not enabled)",
     ),
 ):
-    print("Command:", " ".join(sys.argv))
-    args = SimpleNamespace(
+    logger.debug(f"Command line input arguments: {sys.argv}")
+    preprocess_main(
         forecast_frequency=forecast_frequency,
         input=input,
         name=name,
+        workers=workers,
         overwrite=overwrite,
         no_compress=no_compress,
         not_flat=not_flat,
         stac_only=stac_only,
-        workers=workers,
     )
-    preprocess_main(args)
 
 
 @app.command(help="Ingest generated JSON STAC catalog into pgSTAC database.")
 def ingest(
     catalog: str = typer.Argument(..., help="Path to the STAC catalog JSON file."),
 ):
-    print("Command:", " ".join(sys.argv))
-    args = SimpleNamespace(
+    logger.debug(f"Command line input arguments: {sys.argv}")
+    ingest_main(
         catalog = catalog,
     )
-    ingest_main(args)
 
 
 def main():

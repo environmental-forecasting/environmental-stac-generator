@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 
 from tqdm import tqdm
 
@@ -13,7 +12,16 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
-def main(args: SimpleNamespace):
+def main(
+    forecast_frequency: str,
+    input: list[str],
+    name: str,
+    workers: int,
+    overwrite: bool,
+    no_compress: bool,
+    not_flat: bool,
+    stac_only: bool,
+):
     """
     Main function to generate COGs and generate static JSON STAC catalog.
 
@@ -21,12 +29,14 @@ def main(args: SimpleNamespace):
     using the given CLI arguments.
 
     Args:
-        args: Parsed Command line arguments. The expected keys are:
-            input (List[str]): List of input netCDF files or directories (positional argument).
-            --name (str): Name of collection.
-            --compress (bool): Whether to compress the output COG files.
-            --overwrite (bool): Whether to overwrite existing COG files.
-            --flat (bool): Whether to generate a flat STAC catalog for pgSTAC.
+        forecast_frequency: The frequency of forecasts.
+        input: List of input netCDF files or directories.
+        name: Collection name.
+        workers: Max number of concurrent workers.
+        overwrite: Whether to overwrite existing COG files.
+        no_compress: Disable COG compression.
+        not_flat: Output hierarchical STAC JSON.
+        stac_only: Output only the STAC files.
 
     Raises:
         FileNotFoundError: If no valid netCDF files are found for processing.
@@ -38,17 +48,16 @@ def main(args: SimpleNamespace):
         For daily forecasting, with a flat STAC structure for pgSTAC
         >>> dashboard preprocess 1days raw_data/*.nc -o -f
     """
-    logger.debug(f"Command line input arguments: {args}")
-    if args.input is None:
+    if input is None:
         default_dir = "results/predict"
         logger.warning(f"No input specified, search default location: {default_dir}")
         nc_files = get_nc_files("results/predict/")
-    elif len(args.input) == 1:
+    elif len(input) == 1:
         nc_files = flatten_list(
-            list(filter(None, (get_nc_files(f) for f in args.input)))
+            list(filter(None, (get_nc_files(f) for f in input)))
         )
     else:
-        nc_files = [Path(f) for f in args.input]
+        nc_files = [Path(f) for f in input]
 
     if not nc_files:
         logger.error("No files provided... Please specify which files to convert.")
@@ -64,7 +73,7 @@ def main(args: SimpleNamespace):
         logger.debug(f"Processing {nc_files}")
     else:
         logger.warning("No netCDF files found for processing")
-        raise FileNotFoundError(f"{args.input} is invalid")
+        raise FileNotFoundError(f"{input} is invalid")
 
     stac_generator = STACGenerator()
 
@@ -72,11 +81,11 @@ def main(args: SimpleNamespace):
         pbar.set_description(f"Processing {nc_file}")
         stac_generator.process(
             nc_file=nc_file,
-            name=args.name,
-            compress=args.no_compress,
-            overwrite=args.overwrite,
-            forecast_frequency=args.forecast_frequency,
-            not_flat=args.not_flat,
-            stac_only=args.stac_only,
-            workers=args.workers,
+            name=name,
+            compress=no_compress,
+            overwrite=overwrite,
+            forecast_frequency=forecast_frequency,
+            not_flat=not_flat,
+            stac_only=stac_only,
+            workers=workers,
         )

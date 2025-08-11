@@ -78,4 +78,5 @@ def main(args: SimpleNamespace):
             forecast_frequency=args.forecast_frequency,
             flat=args.flat,
             stac_only=args.stac_only,
+            workers=args.workers,
         )

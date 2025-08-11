@@ -20,6 +20,9 @@ def preprocess(
     name: str = typer.Option(
         "default", "-n", "--name", help="Collection name"
     ),
+    workers: int = typer.Option(
+        4, "-w", "--workers", help="Max number of concurrent workers"
+    ),
     overwrite: bool = typer.Option(
         False, "-o", "--overwrite", help="Overwrite existing COGs"
     ),
@@ -51,6 +54,7 @@ def preprocess(
         no_compress=no_compress,
         flat=flat,
         stac_only=stac_only,
+        workers=workers,
     )
     preprocess_main(args)
 

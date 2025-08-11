@@ -16,6 +16,7 @@ from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
 from shapely.geometry import box, mapping
 from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
 
 from ..cog import write_cog
 from ..utils import (
@@ -265,14 +266,15 @@ class STACGenerator(BaseSTAC):
         if config_output_path.exists():
             with open(config_output_path, "rb") as f:
                 current_config_data = orjson.loads(f.read())
-                diff = DeepDiff(config_data[collection_name], current_config_data[collection_name])
-                if diff:
-                    logger.error(
-                        f"You are attempting to generate collection ({collection_name}) with "
-                        "different options to previous! Run with old values (below) to continue!"
-                    )
-                    logger.error(current_config_data[collection_name])
-                    exit(1)
+                if collection_name in current_config_data:
+                    diff = DeepDiff(config_data[collection_name], current_config_data[collection_name])
+                    if diff:
+                        logger.error(
+                            f"You are attempting to generate collection ({collection_name}) with "
+                            "different options to previous! Run with old values (below) to continue!"
+                        )
+                        logger.error(current_config_data[collection_name])
+                        exit(1)
         else:
             config_output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_output_path, "wb") as f:
@@ -344,6 +346,7 @@ class STACGenerator(BaseSTAC):
         overwrite: bool = False,
         flat: bool = False,
         stac_only: bool = False,
+        workers: int = 1,
     ):
         self._collection_name = name
         self._forecast_frequency = forecast_frequency
@@ -390,7 +393,6 @@ class STACGenerator(BaseSTAC):
 
         ds = xr.open_dataset(nc_file, decode_coords="all")
         for time_idx, time_val in enumerate(time_coords):
-            # Rearrange array dimension to match rioxarray expectation
             ds_time_slice = ds.sel(time=time_val)
 
             # The forecast initialisation time (CF Convention: `forecast_reference_time`) is the first forecast
@@ -425,7 +427,9 @@ class STACGenerator(BaseSTAC):
 
             # Write the netCDF file in addition to the STAC json output
             if not stac_only:
-                self._write_netcdf(ds_time_slice, out_nc_file)
+                # with xr.open_dataset(nc_file, decode_coords="all") as ds:
+                #     ds_time_slice = ds.sel(time=time_val)
+                    self._write_netcdf(ds_time_slice, out_nc_file)
 
             # Add STAC Item for this netCDF file
             item = Item(
@@ -461,81 +465,45 @@ class STACGenerator(BaseSTAC):
             else:
                 forecast_collection.add_item(item)
 
+            args = (
+                forecast_reference_time,
+                leadtime_unit,
+                leadtime_step,
+                ds_time_slice,
+                x_coord,
+                y_coord,
+                crs,
+                cog_dir,
+                stac_only,
+                item,
+                valid_bands,
+                overwrite,
+            )
+
             # Process each leadtime
-            for i in (pbar := tqdm(range(leadtime), desc="COGifying files", leave=True)):
-                valid_time = forecast_reference_time + relativedelta(**{leadtime_unit: i*leadtime_step})
-                ds_leadtime_slice = ds_time_slice.isel(leadtime=i)
+            if workers == 1:
+                for i in (pbar := tqdm(range(leadtime), desc="COGifying files", leave=True)):
+                    cog_file, assets, pbar_description = self._process_leadtime(i, *args)
+                    pbar.set_description(pbar_description)
+                    for asset in assets:
+                        item.add_asset(key=asset["key"], asset=asset["asset"])
+            else:
+                with ProcessPoolExecutor(max_workers=workers) as executor:
+                    with tqdm(total=leadtime, desc="COGifying files", leave=True) as pbar:
+                        futures = []
+                        for i in range(leadtime):
 
-                # Set spatial dimensions for rioxarray
-                ds_leadtime_slice.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+                            future = executor.submit(self._process_leadtime, i, *args)
+                            future.add_done_callback(lambda _: pbar.update(1))
+                            futures.append(future)
 
-                valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
-                valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
+                        # Wait for all futures to complete
+                        for future in futures:
+                            cog_file, assets, pbar_description = future.result()
+                            pbar.set_description(pbar_description)
+                            for asset in assets:
+                                item.add_asset(key=asset["key"], asset=asset["asset"])
 
-                # Add STAC Item for this file
-                item_id_cog = f"{item_id}_lead_{valid_time_str}"
-
-                # Define cog/thumbnail output paths
-                cog_file = cog_dir / f"{item_id_cog}.tif"
-                thumbnail_file = cog_dir / f"{item_id_cog}.jpg"
-
-                # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
-                da_list = []
-                band_names = valid_bands
-                for var_name in band_names:
-                    da_variable = ds_leadtime_slice[var_name]
-                    da_variable.rio.write_crs(crs, inplace=True)
-                    da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
-                    da_list.append(da_variable)
-
-                if not stac_only:
-                    # Stack variables as a single dataset
-                    da_multiband = xr.concat(da_list, dim="band")
-                    da_multiband = da_multiband.assign_coords(band=("band", band_names))
-
-                    if cog_file.exists() and not overwrite:
-                        pbar.set_description(f"File already exists, skipping: {cog_file}")
-                        continue
-                    else:
-                        pbar.set_description(f"Saving all variables to multi-band COG: {cog_file}")
-                    self._write_cog(da_multiband, x_coord, y_coord, crs, cog_file)
-
-                    # Create thumbnail plot for only the first variable for the first leadtime
-                    if i == 0:
-                        self._create_and_write_thumbnail(da_multiband, thumbnail_file, forecast_reference_time, valid_time)
-                else:
-                    pbar.set_description(f"Processing STAC: {item_id_cog}")
-
-                # Add COG asset to item
-                item.add_asset(
-                    key=valid_time_str_fmt,
-                    asset=Asset(
-                        href=str(cog_file),
-                        media_type=pystac.MediaType.COG,
-                        title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
-                        description=f"Variables: {', '.join(band_names)}",
-                        roles=["data"],
-                        extra_fields={
-                            "forecast:bands": [{"name": name} for name in band_names],
-                            "custom:leadtime": i,
-                            "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                        },
-                    ),
-                )
-
-                # Create a thumbnail plot of the first variable for the first leadtime
-                if i == 0:
-                    # Add thumbnail asset to item
-                    # Some STAC tools may only show the first thumbnail asset
-                    item.add_asset(
-                        "thumbnail",
-                        Asset(
-                            href=str(thumbnail_file),
-                            media_type=pystac.MediaType.JPEG,
-                            title="Thumbnail",
-                            roles=["thumbnail"],
-                        ),
-                    )
         ds.close()
 
         # Save catalog and collections
@@ -545,6 +513,87 @@ class STACGenerator(BaseSTAC):
             logger.warning(
                 "Run without `-f`/`--flat` flag, this is not supported for ingestion into pgSTAC database, only stac-browser"
             )
+
+    def _process_leadtime(self, i, forecast_reference_time, leadtime_unit, leadtime_step, ds_time_slice, x_coord, y_coord, crs, cog_dir, stac_only, item, valid_bands, overwrite):
+        valid_time = forecast_reference_time + relativedelta(**{leadtime_unit: i*leadtime_step})
+        ds_leadtime_slice = ds_time_slice.isel(leadtime=i)
+
+        # Set spatial dimensions for rioxarray
+        ds_leadtime_slice.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+
+        valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
+        valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
+
+        # Add STAC Item for this file
+        item_id_cog = f"{item.id}_lead_{valid_time_str}"
+
+        # Define cog/thumbnail output paths
+        cog_file = cog_dir / f"{item_id_cog}.tif"
+        thumbnail_file = cog_dir / f"{item_id_cog}.jpg"
+
+        # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
+        da_list = []
+        band_names = valid_bands
+        for var_name in band_names:
+            da_variable = ds_leadtime_slice[var_name]
+            da_variable.rio.write_crs(crs, inplace=True)
+            da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+            da_list.append(da_variable)
+
+        if not stac_only:
+            # Stack variables as a single dataset
+            da_multiband = xr.concat(da_list, dim="band")
+            da_multiband = da_multiband.assign_coords(band=("band", band_names))
+
+            if cog_file.exists() and not overwrite:
+                pbar_description = f"File already exists, skipping: {cog_file}"
+            else:
+                pbar_description = f"Saving vars to multi-band COG: {cog_file}"
+
+                self._write_cog(da_multiband, x_coord, y_coord, crs, cog_file)
+
+            # Create thumbnail plot for only the first variable for the first leadtime
+            if i == 0:
+                if not thumbnail_file.exists() or overwrite:
+                    self._create_and_write_thumbnail(da_multiband, thumbnail_file, forecast_reference_time, valid_time)
+        else:
+            pbar_description = f"Processing STAC: {item_id_cog}"
+
+        assets = []
+        # Add COG asset to item
+        cog_asset = dict(
+            key=valid_time_str_fmt,
+            asset=Asset(
+                href=str(cog_file),
+                media_type=pystac.MediaType.COG,
+                title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
+                description=f"Variables: {', '.join(band_names)}",
+                roles=["data"],
+                extra_fields={
+                    "forecast:bands": [{"name": name} for name in band_names],
+                    "custom:leadtime": i,
+                    "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                },
+            ),
+        )
+        assets.append(cog_asset)
+
+        # Create a thumbnail plot of the first variable for the first leadtime
+        if i == 0:
+            # Add thumbnail asset to item
+            # Some STAC tools may only show the first thumbnail asset
+            thumbnail_asset = dict(
+                key="thumbnail",
+                asset=Asset(
+                    href=str(thumbnail_file),
+                    media_type=pystac.MediaType.JPEG,
+                    title="Thumbnail",
+                    roles=["thumbnail"],
+                ),
+            )
+            assets.append(thumbnail_asset)
+
+        return cog_file, assets, pbar_description
 
     def _write_netcdf(self, ds_time_slice: xr.Dataset, out_nc_file: Path):
         encoding = {

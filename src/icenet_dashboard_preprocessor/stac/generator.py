@@ -506,36 +506,36 @@ class STACGenerator(BaseSTAC):
                 else:
                     pbar.set_description(f"Processing STAC: {item_id_cog}")
 
-                    # Add COG asset to item
+                # Add COG asset to item
+                item.add_asset(
+                    key=valid_time_str_fmt,
+                    asset=Asset(
+                        href=str(cog_file),
+                        media_type=pystac.MediaType.COG,
+                        title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
+                        description=f"Variables: {', '.join(band_names)}",
+                        roles=["data"],
+                        extra_fields={
+                            "forecast:bands": [{"name": name} for name in band_names],
+                            "custom:leadtime": i,
+                            "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                        },
+                    ),
+                )
+
+                # Create a thumbnail plot of the first variable for the first leadtime
+                if i == 0:
+                    # Add thumbnail asset to item
+                    # Some STAC tools may only show the first thumbnail asset
                     item.add_asset(
-                        key=valid_time_str_fmt,
-                        asset=Asset(
-                            href=str(cog_file),
-                            media_type=pystac.MediaType.COG,
-                            title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
-                            description=f"Variables: {', '.join(band_names)}",
-                            roles=["data"],
-                            extra_fields={
-                                "forecast:bands": [{"name": name} for name in band_names],
-                                "custom:leadtime": i,
-                                "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                            },
+                        "thumbnail",
+                        Asset(
+                            href=str(thumbnail_file),
+                            media_type=pystac.MediaType.JPEG,
+                            title="Thumbnail",
+                            roles=["thumbnail"],
                         ),
                     )
-
-                    # Create a thumbnail plot of the first variable for the first leadtime
-                    if i == 0:
-                        # Add thumbnail asset to item
-                        # Some STAC tools may only show the first thumbnail asset
-                        item.add_asset(
-                            "thumbnail",
-                            Asset(
-                                href=str(thumbnail_file),
-                                media_type=pystac.MediaType.JPEG,
-                                title="Thumbnail",
-                                roles=["thumbnail"],
-                            ),
-                        )
         ds.close()
 
         # Save catalog and collections

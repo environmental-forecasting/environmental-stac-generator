@@ -28,6 +28,7 @@ from ..utils import (
 
 logger = logging.getLogger(__name__)
 
+
 class BaseSTAC:
     def __init__(
         self,
@@ -40,24 +41,30 @@ class BaseSTAC:
         Initialises the BaseSTAC class with a path to an existing STAC catalog.
 
         Args:
-            data_path (optional): The path to the directory containing input files used to generate the STAC catalog.
+            data_path (optional): The path to the directory containing input files used
+                to generate the STAC catalog.
                 Defaults to `data/` if not provided.
             catalog_defs (optional): Dictionary of metadata for the root STAC catalog.
-                If not provided, defaults to a standard BAS environmental forecast catalog definition.
-            stac_catalog_file (optional): The path where the generated STAC catalog JSON file should be saved.
-                If not provided, it will be created based on the data_path or other internal logic.
+                If not provided, defaults to a standard BAS environmental forecast catalog
+                definition.
+            stac_catalog_file (optional): The path where the generated STAC catalog JSON
+                file should be saved.
+                If not provided, it will be created based on the data_path or other internal
+                logic.
             license (optional): SPDX license identifier for the items in the STAC catalog.
                 Defaults to `"OGL-UK-3.0"` if not provided.
         """
         if not catalog_defs:
             catalog_defs = {
-                    "id": "bas-environmental-forecasts",
-                    "description": "Catalog of BAS Environmental Forecast Data",
-                    "title": "BAS Environmental Forecasting STAC Catalog",
+                "id": "bas-environmental-forecasts",
+                "description": "Catalog of BAS Environmental Forecast Data",
+                "title": "BAS Environmental Forecasting STAC Catalog",
             }
 
         self._data_path = data_path
-        self._license = license if license else "OGL-UK-3.0"   # Ref: https://spdx.org/licenses/
+        self._license = (
+            license if license else "OGL-UK-3.0"
+        )  # Ref: https://spdx.org/licenses/
 
         self._load_dotenv()
         self._set_catalog_path(stac_catalog_file=stac_catalog_file)
@@ -522,7 +529,9 @@ class STACGenerator(BaseSTAC):
             ds = ds.assign_coords({x_coord: ds.coords[x_coord] * 1000})
         return ds
 
-    def _get_bbox_and_geometry(self, ds: xr.Dataset, x_coord: str, y_coord: str, crs: str) -> tuple:
+    def _get_bbox_and_geometry(
+        self, ds: xr.Dataset, x_coord: str, y_coord: str, crs: str
+    ) -> tuple:
         """
         Calculate bounding box and geometry from dataset coordinates.
 
@@ -709,6 +718,7 @@ class STACGenerator(BaseSTAC):
                     "forecast:end_time": forecast_end_time.strftime(
                         "%Y-%m-%dT%H:%M:%SZ"
                     ),
+                    "forecast:leadtime": leadtime,
                     "custom:hemisphere": hemisphere,
                 },
             )
@@ -724,7 +734,7 @@ class STACGenerator(BaseSTAC):
                 Asset(
                     href=str(out_nc_file),
                     media_type=pystac.MediaType.NETCDF,
-                    title=f"Forecast -> netCDF from {forecast_reference_time_str_fmt}",
+                    title=f"Full forecast netCDF from {forecast_reference_time_str_fmt}",
                     description="netCDF file container forecast variables for forecast"
                                 f" initialised at: {forecast_reference_time_str_fmt}",
                     roles=["data"],
@@ -835,7 +845,8 @@ class STACGenerator(BaseSTAC):
         cog_file = cog_dir / f"{item_id_cog}.tif"
         thumbnail_file = cog_dir / f"{item_id_cog}.jpg"
 
-        # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
+        # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG
+        # (for thumbnail)
         da_list = []
         band_names = valid_bands
         for var_name in band_names:
@@ -875,7 +886,7 @@ class STACGenerator(BaseSTAC):
             asset=Asset(
                 href=str(cog_file),
                 media_type=pystac.MediaType.COG,
-                title=f"Forecast -> Multi-band COG at {valid_time_str_fmt}",
+                title=f"Forecast at {valid_time_str_fmt}",
                 description=f"Variables: {', '.join(band_names)}",
                 roles=["data"],
                 extra_fields={
@@ -942,7 +953,8 @@ class STACGenerator(BaseSTAC):
             crs: Coordinate Reference System (EPSG code).
             cog_file: Path to the output COG file.
         """
-        # Add metadata to extracted variable so `to_raster` includes them in the output GeoTIFF
+        # Add metadata to extracted variable so `to_raster` includes them in the output
+        # GeoTIFF
         da_multiband.rio.write_crs(crs, inplace=True)
         da_multiband.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
         # da_multiband.rio.to_raster(cog_path, driver="COG", compress=self._compress_method)

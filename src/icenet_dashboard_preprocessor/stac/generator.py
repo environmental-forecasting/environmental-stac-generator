@@ -268,9 +268,10 @@ class STACGenerator(BaseSTAC):
                 diff = DeepDiff(config_data[collection_name], current_config_data[collection_name])
                 if diff:
                     logger.error(
-                        "Running with different options to previous! Run with old values (below) to continue!"
+                        f"You are attempting to generate collection ({collection_name}) with "
+                        "different options to previous! Run with old values (below) to continue!"
                     )
-                    logger.error(config_data)
+                    logger.error(current_config_data[collection_name])
                     exit(1)
         else:
             config_output_path.parent.mkdir(parents=True, exist_ok=True)

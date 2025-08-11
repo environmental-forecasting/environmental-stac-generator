@@ -244,21 +244,22 @@ class STACGenerator(BaseSTAC):
         collection_name = self._collection_name
         self._netcdf_output_dir = data_path / "netcdf" / collection_name
         self._cogs_output_dir = data_path / "cogs" / collection_name
+        # Store a config file of how the preprocessor was run
         self._config_output_path = data_path / "config.json"
 
-    def _process_input_options(self):
-        collection_name = self._collection_name
-        config_output_path = self._config_output_path
-        forecast_frequency = self._forecast_frequency
-        flat = self._flat
-
+    def _validate_input_options(self):
         # Store input options to file
         config_data = {
-            collection_name: {
-                "forecast_frequency": forecast_frequency,
-                "flat": flat,
+            self._collection_name: {
+                "forecast_frequency": self._forecast_frequency,
+                "flat": self._flat,
             }
         }
+        self._store_config(config_data)
+
+    def _store_config(self, config_data: dict):
+        collection_name = self._collection_name
+        config_output_path = self._config_output_path
 
         # Ensure we're running with same options as any previous runs
         if config_output_path.exists():
@@ -275,6 +276,63 @@ class STACGenerator(BaseSTAC):
             config_output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_output_path, "wb") as f:
                 f.write(orjson.dumps(config_data, option=orjson.OPT_INDENT_2))
+
+    def get_forecast_info(self, nc_file: Path):
+        with xr.open_dataset(nc_file, decode_coords="all") as ds:
+            # Determine spatial coordinates
+            x_coord = find_coord(ds, ["xc", "x", "lon", "longitude"])
+            y_coord = find_coord(ds, ["yc", "y", "lat", "latitude"])
+
+            # Get time-related coordinate information
+            time_coords: xr.DataArray = ds.coords.get("time", ds.coords.get("forecast_time"))
+            leadtime_coords: xr.DataArray = ds.coords.get("leadtime", ds.coords.get("lead_time"))
+
+            if x_coord is None or y_coord is None:
+                raise ValueError("Spatial coordinates not found in dataset")
+
+            # Convert km to m if needed
+            ds = self._convert_units(ds, x_coord, y_coord)
+
+            # Filter 4D variables - these are variables of interest for COGs
+            # Assuming other vars shouldn't be converted to COGs
+            valid_bands = [
+                var for var in ds.data_vars
+                if len(ds[var].dims) == 4
+            ]
+
+            # Get attributes from NetCDF file
+            nc_attrs = ds.attrs
+            crs = nc_attrs["geospatial_bounds_crs"]
+            ds.rio.write_crs(crs, inplace=True)
+
+            # Get bounding box of dataset (in expected "EPSG:4326")
+            bbox, geometry = self._get_bbox_and_geometry(ds, x_coord, y_coord, crs)
+
+            # Get temporal bounds from input netCDF
+            time_coords_start = pd.to_datetime(time_coords.isel(time=0).values)
+            time_coords_end = pd.to_datetime(time_coords.isel(time=-1).values)
+
+            return crs, bbox, geometry, valid_bands, x_coord, y_coord, time_coords, time_coords_start, time_coords_end, leadtime_coords
+
+    def _convert_units(self, ds: xr.Dataset, x_coord: str, y_coord: str):
+            # Convert eastings and northings from kilometers to metres (if need to).
+            if ds.coords[y_coord].attrs.get("units", None) in ["1000 meter", "km"]: # `1000 meter` is legacy support for `icenet < v0.4.0``
+                ds = ds.assign_coords({y_coord: ds.coords[y_coord] * 1000})
+            if ds.coords[x_coord].attrs.get("units", None) in ["1000 meter", "km"]:
+                ds = ds.assign_coords({x_coord: ds.coords[x_coord] * 1000})
+            return ds
+
+    def _get_bbox_and_geometry(self, ds: xr.Dataset, x_coord: str, y_coord: str, crs: str):
+            # Compute bounding box and geometry from coordinates
+            x_min, x_max = float(ds[x_coord].min()), float(ds[x_coord].max())
+            y_min, y_max = float(ds[y_coord].min()), float(ds[y_coord].max())
+            bbox = [x_min, y_min, x_max, y_max]
+
+            # If projected CRS, convert to WGS84
+            if crs not in ["EPSG:4326", "4326"]:
+                bbox = proj_to_geo(bbox_projected=bbox, src_crs=crs)
+            geometry = mapping(box(*bbox)) # type: ignore
+            return bbox, geometry
 
     def process(
         self,
@@ -295,78 +353,40 @@ class STACGenerator(BaseSTAC):
         # Initialise output paths
         self._set_out_paths()
 
+        self._validate_input_options()
+
         # Get input time delta options to compute forecast times
         leadtime_step, leadtime_unit = parse_forecast_frequency(forecast_frequency)
 
         catalog = self._stac_catalog
 
-        with xr.open_dataset(nc_file, decode_coords="all") as ds:
-            # Determine spatial coordinates
-            x_coord = find_coord(ds, ["xc", "x", "lon", "longitude"])
-            y_coord = find_coord(ds, ["yc", "y", "lat", "latitude"])
+        # Get required coords and metadata from forecast netCDF file
+        crs, bbox, geometry, valid_bands, x_coord, y_coord, time_coords, time_coords_start, time_coords_end, leadtime_coords = self.get_forecast_info(nc_file)
+        leadtime = len(leadtime_coords)
 
-            # Get time-related coordinate information
-            time_coords: xr.DataArray = ds.coords.get("time", ds.coords.get("forecast_time"))
-            leadtime_coords: xr.DataArray = ds.coords.get("leadtime", ds.coords.get("lead_time"))
-            leadtime = len(leadtime_coords)
+        # Create (or retrieve) highest level collection (model name) within the catalog
+        main_collection = self.get_or_create_collection(
+            parent=catalog,
+            collection_id=name,
+            title=f"Model Collection: {name}",
+            description=f"{name} collection",
+            bbox=bbox,
+            license=self._license,
+            temporal_extent=[time_coords_start, time_coords_end],
+        )
 
-            if x_coord is None or y_coord is None:
-                raise ValueError("Spatial coordinates not found in dataset")
-
-            # Convert eastings and northings from kilometers to metres (if need to).
-            if ds.coords[y_coord].attrs.get("units", None) in ["1000 meter", "km"]: # `1000 meter` is legacy support for `icenet < v0.4.0``
-                ds = ds.assign_coords({y_coord: ds.coords[y_coord] * 1000})
-            if ds.coords[x_coord].attrs.get("units", None) in ["1000 meter", "km"]:
-                ds = ds.assign_coords({x_coord: ds.coords[x_coord] * 1000})
-
-            # Filter 4D variables - these are variables of interest for COGs
-            # Assuming other vars shouldn't be converted to COGs
-            valid_bands = [
-                var for var in ds.data_vars
-                if len(ds[var].dims) == 4
-            ]
-
-            # Get attributes from NetCDF file
-            nc_attrs = ds.attrs
-            crs = nc_attrs["geospatial_bounds_crs"]
-            ds.rio.write_crs(crs, inplace=True)
-
-            # Compute bounding box and geometry from coordinates
-            x_min, x_max = float(ds[x_coord].min()), float(ds[x_coord].max())
-            y_min, y_max = float(ds[y_coord].min()), float(ds[y_coord].max())
-            bbox = [x_min, y_min, x_max, y_max]
-
-            # If projected CRS, convert to WGS84
-            if crs not in ["EPSG:4326", "4326"]:
-                bbox = proj_to_geo(bbox_projected=bbox, src_crs=crs)
-            geometry = mapping(box(*bbox)) # type: ignore
-
-            # Get temporal extent range from input netCDF
-            time_coords_start = pd.to_datetime(time_coords.isel(time=0).values)
-            time_coords_end = pd.to_datetime(time_coords.isel(time=-1).values)
-
-            # Create (or retrieve) highest level collection (model name) within the catalog
-            main_collection = self.get_or_create_collection(
-                parent=catalog,
-                collection_id=name,
-                title=f"Model Collection: {name}",
-                description=f"{name} collection",
+        if not flat:
+            # Create (or retrieve) a hemisphere collection within the main collection
+            hemisphere_collection = self.get_or_create_collection(
+                parent=main_collection,
+                collection_id=hemisphere,
+                title=f"Hemisphere Collection: {hemisphere.capitalize()}",
+                description=f"{hemisphere.capitalize()} hemisphere collection",
                 bbox=bbox,
-                license=self._license,
                 temporal_extent=[time_coords_start, time_coords_end],
             )
 
-            if not flat:
-                # Create (or retrieve) a hemisphere collection within the main collection
-                hemisphere_collection = self.get_or_create_collection(
-                    parent=main_collection,
-                    collection_id=hemisphere,
-                    title=f"Hemisphere Collection: {hemisphere.capitalize()}",
-                    description=f"{hemisphere.capitalize()} hemisphere collection",
-                    bbox=bbox,
-                    temporal_extent=[time_coords_start, time_coords_end],
-                )
-
+        ds = xr.open_dataset(nc_file, decode_coords="all")
         for time_idx, time_val in enumerate(time_coords):
             # Rearrange array dimension to match rioxarray expectation
             ds_time_slice = ds.sel(time=time_val)
@@ -399,18 +419,8 @@ class STACGenerator(BaseSTAC):
             item_id = f"{hemisphere}_forecast_init_{forecast_reference_time_str}"
 
             # Save the forecast init slice as a netcdf file
-            nc_path = ncdf_dir / f"{item_id}.nc"
-            encoding = {
-                var: {
-                    "zlib": True,
-                    "complevel": 9,
-                } for var in ds_time_slice.data_vars
-            }
-            ds_time_slice.to_netcdf(
-                nc_path,
-                engine="h5netcdf",
-                encoding=encoding,
-            )
+            out_nc_file = ncdf_dir / f"{item_id}.nc"
+            self._write_netcdf(ds_time_slice, out_nc_file)
 
             # Add STAC Item for this netCDF file
             item = Item(
@@ -424,11 +434,17 @@ class STACGenerator(BaseSTAC):
                     "custom:hemisphere": hemisphere,
                 },
             )
+
+            # Add projection extension
+            ProjectionExtension.add_to(item)
+            proj = ProjectionExtension.ext(item)
+            proj.code = crs
+
             # Add netCDF asset to item
             item.add_asset(
                 "netcdf",
                 Asset(
-                    href=str(nc_path),
+                    href=str(out_nc_file),
                     media_type=pystac.MediaType.NETCDF,
                     title=f"Forecast -> netCDF from {forecast_reference_time_str_fmt}",
                     description=f"netCDF file container forecast variables for forecast initialised at: {forecast_reference_time_str_fmt}",
@@ -450,17 +466,6 @@ class STACGenerator(BaseSTAC):
 
                 valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
                 valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
-
-                # Add projection extension
-                ProjectionExtension.add_to(item)
-                proj = ProjectionExtension.ext(item)
-                proj.code = crs
-
-                # Add item to collection
-                if flat:
-                    main_collection.add_item(item)
-                else:
-                    forecast_collection.add_item(item)
 
                 # Save variables as one multi-band COG (Cloud Optimized GeoTIFF) & JPG (for thumbnail)
                 da_list = []
@@ -514,12 +519,7 @@ class STACGenerator(BaseSTAC):
 
                 # Create a thumbnail plot of the first variable for the first leadtime
                 if i == 0:
-                    fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
-                    da_multiband.sel(band=band_names[0]).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
-                    plt.axis('off')
-                    plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time_str_fmt}")
-                    plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
-                    plt.close(fig)
+                    self._create_thumbnail(da_multiband, thumbnail_path, forecast_reference_time, valid_time)
 
                     # Add thumbnail asset to item
                     # Some STAC tools may only show the first thumbnail asset
@@ -532,6 +532,7 @@ class STACGenerator(BaseSTAC):
                             roles=["thumbnail"],
                         ),
                     )
+        ds.close()
 
         # Save catalog and collections
 
@@ -556,3 +557,25 @@ class STACGenerator(BaseSTAC):
             logger.warning(
                 "Run without `-f`/`--flat` flag, this is not supported for ingestion into pgSTAC database, only stac-browser"
             )
+
+    def _write_netcdf(self, ds_time_slice: xr.Dataset, out_nc_file: Path):
+        encoding = {
+            var: {
+                "zlib": True,
+                "complevel": 9,
+            } for var in ds_time_slice.data_vars
+        }
+        ds_time_slice.to_netcdf(
+            out_nc_file,
+            engine="h5netcdf",
+            encoding=encoding,
+        )
+
+    def _create_thumbnail(self, da_multiband: xr.DataArray, thumbnail_path, forecast_reference_time, valid_time):
+        fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
+        # da_multiband.sel(band=band_names[0]).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
+        da_multiband.isel(band=0).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
+        plt.axis('off')
+        plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time}")
+        plt.savefig(thumbnail_path, pad_inches=0, transparent=False)
+        plt.close(fig)

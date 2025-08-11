@@ -381,6 +381,9 @@ class STACGenerator(BaseSTAC):
         )
 
         if not_flat:
+            DeprecationWarning(
+                "Run with `-nf`/`--not-flat` flag, this is not supported for ingestion into pgSTAC database, only stac-browser"
+            )
             # Create (or retrieve) a hemisphere collection within the main collection
             hemisphere_collection = self.get_or_create_collection(
                 parent=main_collection,
@@ -501,10 +504,6 @@ class STACGenerator(BaseSTAC):
         # Save catalog and collections
         self.save_catalog()
 
-        if not_flat:
-            DeprecationWarning(
-                "Run with `-nf`/`--not-flat` flag, this is not supported for ingestion into pgSTAC database, only stac-browser"
-            )
 
     def _process_leadtime(self, i, forecast_reference_time, leadtime_unit, leadtime_step, ds_time_slice, x_coord, y_coord, crs, cog_dir, stac_only, item, valid_bands, overwrite):
         valid_time = forecast_reference_time + relativedelta(**{leadtime_unit: i*leadtime_step})

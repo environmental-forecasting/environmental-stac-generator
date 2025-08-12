@@ -62,10 +62,14 @@ def preprocess(
 @app.command(help="Ingest generated JSON STAC catalog into pgSTAC database.")
 def ingest(
     catalog: str = typer.Argument(..., help="Path to the STAC catalog JSON file."),
+    overwrite: bool = typer.Option(
+        False, "-o", "--overwrite", help="Overwrite any matching collections/items"
+    ),
 ):
     logger.debug(f"Command line input arguments: {sys.argv}")
     ingest_main(
         catalog = catalog,
+        overwrite = overwrite,
     )
 
 

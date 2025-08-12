@@ -8,7 +8,7 @@ from .stac.dataloader import PGSTACDataLoader
 logger = logging.getLogger(__name__)
 
 
-def main(catalog: str) -> None:
+def main(catalog: str, overwrite: bool = False) -> None:
     """
     Main function to ingest pre-generated STAC catalogs into pgSTAC database.
 
@@ -18,12 +18,11 @@ def main(catalog: str) -> None:
 
     Args:
         catalog: Path to the JSON STAC catalog file to be ingested.
+        overwrite: Whether to overwrite any existing matching collections/items.
+                   Defaults to False.
 
     Raises:
         FileNotFoundError: If no valid JSON files are found for ingestion.
-
-    Returns:
-        None
 
     Raises:
         ValueError: If the `STAC_FASTAPI_URL` environment variable is not set.
@@ -49,4 +48,4 @@ def main(catalog: str) -> None:
         return
 
     # Actually load the STAC metadata into PgSTAC database
-    loader.load_stac_catalog(catalog_file=catalog)
+    loader.load_stac_catalog(catalog_file=catalog, overwrite=overwrite)

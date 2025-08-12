@@ -31,21 +31,26 @@ class PGSTACDataLoader:
         logger.error("STAC API not accessible after maximum retries")
         return False
 
-    def create_collection(self, collection_dict: dict) -> bool:
+    def create_collection(self, collection_dict: dict, overwrite: bool = False) -> bool:
         """Create a collection in PgSTAC"""
         try:
-            response = self.session.post(
-                f"{self.stac_api_url}/collections",
+            kwargs = dict(
+                url=f"{self.stac_api_url}/collections",
                 json=collection_dict,
                 headers={"Content-Type": pystac.MediaType.JSON},
             )
+            response = self.session.post(**kwargs) # type: ignore
 
             # Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status
             if response.status_code in [200, 201]:
                 logger.info(f"Created collection: {collection_dict['id']}")
                 return True
             elif response.status_code == 409:
-                logger.info(f"Collection already exists: {collection_dict['id']}")
+                message = f"Collection already exists: {collection_dict['id']}"
+                if overwrite:
+                    message = "Overwrite requested, " + message
+                    response = self.session.put(**kwargs) # type: ignore
+                logger.info(f"{message}")
                 return True
             else:
                 logger.error(
@@ -57,20 +62,25 @@ class PGSTACDataLoader:
             logger.error(f"Error creating collection: {e}")
             return False
 
-    def create_item(self, collection_id: str, item_dict: dict) -> bool:
+    def create_item(self, collection_id: str, item_dict: dict, overwrite: bool = False) -> bool:
         """Create an item in PgSTAC"""
         try:
-            response = self.session.post(
-                f"{self.stac_api_url}/collections/{collection_id}/items",
+            kwargs = dict(
+                url=f"{self.stac_api_url}/collections/{collection_id}/items",
                 json=item_dict,
                 headers={"Content-Type": pystac.MediaType.JSON},
             )
+            response = self.session.post(**kwargs) # type: ignore
 
             if response.status_code == 201:
                 logger.info(f"Created item: {item_dict['id']}")
                 return True
             elif response.status_code == 409:
-                logger.info(f"Item already exists: {item_dict['id']}")
+                message = f"Item already exists: {item_dict['id']}"
+                if overwrite:
+                    message = "Overwrite requested, " + message
+                    response = self.session.put(**kwargs) # type: ignore
+                logger.info(f"{message}")
                 return True
             else:
                 logger.error(
@@ -106,7 +116,9 @@ class PGSTACDataLoader:
     #     return all_collections, all_items
 
     def load_stac_catalog(
-        self, catalog_file: str | Path = Path("data/stac_flat/catalog.json")
+        self,
+        catalog_file: str | Path = Path("data/stac_flat/catalog.json"),
+        overwrite: bool = False,
     ) -> bool:
         """Load STAC catalog into PgSTAC"""
         if isinstance(catalog_file, str):
@@ -119,10 +131,9 @@ class PGSTACDataLoader:
         catalog = Catalog.from_file(catalog_file)
 
         collection = list(catalog.get_collections())
-        print("Main collection:", collection)
         for collection in catalog.get_all_collections():
             # nested_collections, items = self.flatten_collection(collection)
-            self._load_collection_from_file(collection)
+            self._load_collection_from_file(collection, overwrite)
 
         return True
 
@@ -134,10 +145,10 @@ class PGSTACDataLoader:
             current = current.get_parent()
         return hierarchy
 
-    def _load_collection_from_file(self, collection: Collection) -> None:
+    def _load_collection_from_file(self, collection: Collection, overwrite=False) -> None:
         """Load a collection and its items from file"""
 
-        self.create_collection(collection.to_dict())
+        self.create_collection(collection.to_dict(), overwrite=overwrite)
 
         # `get_all_items()` also walks through back-references - creates duplicates, so, need to de-duplicate.
         items = collection.get_all_items()
@@ -148,4 +159,4 @@ class PGSTACDataLoader:
             # catalog_hierarchy = reversed(self._get_item_hierarchy(item))
             # print(list(catalog_hierarchy))
 
-            self.create_item(collection.id, item.to_dict())
+            self.create_item(collection.id, item.to_dict(), overwrite=overwrite)

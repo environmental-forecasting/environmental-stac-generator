@@ -182,60 +182,53 @@ class BaseSTAC:
                 ),
             )
             parent.add_child(collection)
-        return collection
+        return collection # type: ignore
 
-    def create_stac_item(
+    def get_or_create_item(
         self,
+        collection: Collection,
         item_id: str,
         geometry: dict,
         bbox: list,
         datetime: datetime,
         crs: str,
         properties: dict,
-        netcdf_file: Path,
-        title: str,
-        description: str,
     ) -> Item:
         """
-        Create a STAC Item with netCDF asset and metadata.
+        Retrieve or create a STAC Item within the given parent collection.
 
-        Constructs an Item with the provided geometry, temporal/spatial extent,
-        and adds a netCDF Asset with the specified path, title, and description.
-        Adds projection extension for coordinate reference system (CRS).
+        If an item with the specified ID already exists as a child of the
+        collection, it is returned. Otherwise, a new Item is created with the
+        provided geometry, temporal/spatial extent, and properties. Also adds
+        projection extension for coordinate reference system (CRS).
 
         Args:
+            collection: Parent STAC Collection to add the Item to.
             item_id: Unique identifier for the STAC Item.
             geometry: GeoJSON-like dictionary representing item geometry.
             bbox: Bounding box [west, south, east, north] in WGS84 coordinates.
             datetime: Datetime object representing item temporal extent.
             crs: Coordinate Reference System code (e.g., "EPSG:4326").
             properties: Additional metadata properties for the item.
-            netcdf_file: Path to the netCDF file asset.
-            title: Title of the dataset in the netCDF file.
-            description: Description of the dataset in the netCDF file.
 
         Returns:
             Item: The created STAC Item with associated Asset and extensions.
         """
-        item = Item(
-            id=item_id,
-            geometry=geometry,
-            bbox=bbox,
-            datetime=datetime,
-            properties=properties,
-        )
-        ProjectionExtension.add_to(item).code = crs
-        item.add_asset(
-            "netcdf",
-            Asset(
-                href=str(netcdf_file),
-                media_type=pystac.MediaType.NETCDF,
-                title=title,
-                description=description,
-                roles=["data"],
-            ),
-        )
-        return item
+        item: Item | None = collection.get_item(item_id)
+        if not item:
+            item = Item(
+                id=item_id,
+                geometry=geometry,
+                bbox=bbox,
+                datetime=datetime,
+                properties=properties,
+            )
+            # Add projection extension
+            ProjectionExtension.add_to(item)
+            proj = ProjectionExtension.ext(item)
+            proj.code = crs
+            collection.add_item(item)
+        return item # type: ignore
 
     def create_multiband_raster(
         self,
@@ -706,11 +699,13 @@ class STACGenerator(BaseSTAC):
                     self._write_netcdf(ds_time_slice, out_nc_file)
 
             # Add STAC Item for this netCDF file
-            item = Item(
-                id=item_id,
+            item = self.get_or_create_item(
+                collection=forecast_collection if not_flat else main_collection,
+                item_id=item_id,
                 geometry=geometry,
                 bbox=bbox,
                 datetime=forecast_reference_time,
+                crs=crs,
                 properties={
                     "forecast:reference_time": forecast_reference_time.strftime(
                         "%Y-%m-%dT%H:%M:%SZ"
@@ -722,11 +717,6 @@ class STACGenerator(BaseSTAC):
                     "custom:hemisphere": hemisphere,
                 },
             )
-
-            # Add projection extension
-            ProjectionExtension.add_to(item)
-            proj = ProjectionExtension.ext(item)
-            proj.code = crs
 
             # Add netCDF asset to item
             item.add_asset(
@@ -740,10 +730,6 @@ class STACGenerator(BaseSTAC):
                     roles=["data"],
                 ),
             )
-            if not_flat:
-                forecast_collection.add_item(item)
-            else:
-                main_collection.add_item(item)
 
             process_args = (
                 forecast_reference_time,

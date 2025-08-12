@@ -677,6 +677,8 @@ class STACGenerator(BaseSTAC):
                     temporal_extent=[forecast_reference_time, forecast_end_time],
                 )
 
+            collection = forecast_collection if not_flat else main_collection
+
             # Create output dirs
             ncdf_dir = Path(
                 self._netcdf_output_dir / f"{hemisphere}/{forecast_reference_date}"
@@ -700,7 +702,7 @@ class STACGenerator(BaseSTAC):
 
             # Add STAC Item for this netCDF file
             item = self.get_or_create_item(
-                collection=forecast_collection if not_flat else main_collection,
+                collection=collection,
                 item_id=item_id,
                 geometry=geometry,
                 bbox=bbox,
@@ -759,10 +761,16 @@ class STACGenerator(BaseSTAC):
 
                     # Wait for all futures to complete
                     for future in futures:
-                        cog_file, assets, pbar_description = future.result()
+                        i, cog_file, assets, pbar_description = future.result()
                         pbar.set_description(pbar_description)
                         for asset in assets:
                             item.add_asset(key=asset["key"], asset=asset["asset"])
+                            # Use the first thumbnail generated for this item as the
+                            # thumbnail for the collection as well.
+                            if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
+                                # Skip if the collection already has a thumbnail asset
+                                if not collection.get_assets(role="thumbnail"):
+                                    collection.add_asset(key=asset["key"], asset=asset["asset"])
 
         ds.close()
 
@@ -899,7 +907,7 @@ class STACGenerator(BaseSTAC):
             )
             assets.append(thumbnail_asset)
 
-        return cog_file, assets, pbar_description
+        return i, cog_file, assets, pbar_description
 
     def _write_netcdf(self, ds_time_slice: xr.Dataset, out_nc_file: Path):
         """
@@ -962,12 +970,12 @@ class STACGenerator(BaseSTAC):
             forecast_reference_time: Forecast initialization time (datetime).
             valid_time: Valid time for the leadtime being processed (datetime).
         """
-        fig = plt.figure(figsize=(5, 5), dpi=100, constrained_layout=True)
-        # da_multiband.sel(band=band_names[0]).plot(cmap='RdBu_r', add_colorbar=True) # type: ignore
-        da_multiband.isel(band=0).plot(cmap="RdBu_r", add_colorbar=True)  # type: ignore
+        fig = plt.figure(figsize=(5, 5), dpi=300, constrained_layout=True)
+        da_multiband.isel(band=0).plot(cmap="RdBu_r", add_colorbar=False)  # type: ignore
+        # plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time}")
+        plt.title("")
         plt.axis("off")
-        plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time}")
-        plt.savefig(thumbnail_file, pad_inches=0, transparent=False)
+        plt.savefig(thumbnail_file, pad_inches=0, bbox_inches="tight", transparent=False)
         plt.close(fig)
 
     def save_catalog(self):

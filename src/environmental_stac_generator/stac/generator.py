@@ -710,6 +710,19 @@ class STACGenerator(BaseSTAC):
                 #     ds_time_slice = ds.sel(time=time_val)
                     self._write_netcdf(ds_time_slice, out_nc_file)
 
+            properties={
+                "forecast:reference_time": forecast_reference_time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "forecast:end_time": forecast_end_time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "forecast:leadtime": leadtime,
+            }
+
+            if hemisphere:
+                properties |= {"custom:hemisphere": hemisphere}
+
             # Add STAC Item for this netCDF file
             item = self.get_or_create_item(
                 collection=collection,
@@ -718,16 +731,7 @@ class STACGenerator(BaseSTAC):
                 bbox=bbox,
                 datetime=forecast_reference_time,
                 crs=crs,
-                properties={
-                    "forecast:reference_time": forecast_reference_time.strftime(
-                        "%Y-%m-%dT%H:%M:%SZ"
-                    ),
-                    "forecast:end_time": forecast_end_time.strftime(
-                        "%Y-%m-%dT%H:%M:%SZ"
-                    ),
-                    "forecast:leadtime": leadtime,
-                    "custom:hemisphere": hemisphere,
-                },
+                properties=properties,
             )
 
             # Add netCDF asset to item

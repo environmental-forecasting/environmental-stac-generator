@@ -226,7 +226,7 @@ class BaseSTAC:
             # Add projection extension
             ProjectionExtension.add_to(item)
             proj = ProjectionExtension.ext(item)
-            proj.code = crs
+            proj.code = crs # type: ignore
             collection.add_item(item)
         return item # type: ignore
 
@@ -662,7 +662,7 @@ class STACGenerator(BaseSTAC):
                 "%Y-%m-%d %H:%M"
             )
             forecast_end_time = forecast_reference_time + relativedelta(
-                **{leadtime_unit: leadtime - 1}
+                **{leadtime_unit: leadtime - 1} # type: ignore
             )
             forecast_end_time_str_fmt = forecast_end_time.strftime("%Y-%m-%d %H:%M")
 
@@ -812,7 +812,7 @@ class STACGenerator(BaseSTAC):
                 - pbar_description: Description for progress bar updates.
         """
         valid_time = forecast_reference_time + relativedelta(
-            **{leadtime_unit: i * leadtime_step}
+            **{leadtime_unit: i * leadtime_step} # type: ignore
         )
         ds_leadtime_slice = ds_time_slice.isel(leadtime=i)
 

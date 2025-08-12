@@ -11,6 +11,8 @@ A command-line tool for generating **Cloud Optimized GeoTIFFs (COGs)** and **STA
 - Builds STAC-compliant metadata catalogs for each forecast
 - Supports compressed or uncompressed output
 - Dynamically detects northern or southern hemisphere from input data
+- Outputs COGs, sliced netCDFs, and thumbnails in standardised format
+- Generates config files to ensure consistent processing
 
 ## Installation
 
@@ -40,9 +42,9 @@ FILE_SERVER_URL=http://localhost:8002
 
 ### Positional Parameters
 
-The first parameter is the forecast frequency.
+The first parameter is the forecast frequency (e.g., "6hours", "1days").
 
-The second and further arguments are the paths to one or more `.nc` files.
+The second and further arguments are the paths to one or more `.nc` files, directories, or wildcard patterns.
 
 ### Options
 
@@ -51,7 +53,11 @@ The optional flags that can be used are:
 | Flag                  | Description                                                            |
 | --------------------- | ---------------------------------------------------------------------- |
 | `--overwrite`, `-o`   | Overwrite existing GeoTIFF files if they already exist.                |
-| `--no_compress`, `-c` | Disable compression in generated GeoTIFFs (default is compressed).     |
+| `--no-compress`, `-c` | Disable compression in generated GeoTIFFs (default is compressed).     |
+| `--name`, `-n`        | Specify a collection name (default: "default")                         |
+| `--workers`, `-w`     | Set max number of concurrent workers (default: 4)                      |
+| `--not-flat`, `-nf`   | Output hierarchical STAC JSON (default is flat for pgSTAC compatibility) |
+| `--stac-only`, `-s`   | Output only the STAC files, not COGs/Thumbnails (default not enabled)  |
 
 The ingestion requires the [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator) docker compose environment to be running (since it will ingest into a PostgreSQL database). Please follow the [README](https://github.com/environmental-forecasting/environmental-stac-orchestrator/blob/main/README.md) from it.
 

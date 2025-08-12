@@ -632,7 +632,7 @@ class STACGenerator(BaseSTAC):
             temporal_extent=[time_coords_start, time_coords_end],
         )
 
-        if not_flat:
+        if not_flat and hemisphere:
             DeprecationWarning(
                 "Run with `-nf`/`--not-flat` flag, this is not supported for ingestion"
                 " into pgSTAC database, only stac-browser"
@@ -666,7 +666,7 @@ class STACGenerator(BaseSTAC):
             )
             forecast_end_time_str_fmt = forecast_end_time.strftime("%Y-%m-%d %H:%M")
 
-            if not_flat:
+            if not_flat and hemisphere:
                 # Create (or retrieve) a forecast collection within the catalog
                 forecast_collection = self.get_or_create_collection(
                     parent=hemisphere_collection,
@@ -680,16 +680,26 @@ class STACGenerator(BaseSTAC):
             collection = forecast_collection if not_flat else main_collection
 
             # Create output dirs
-            ncdf_dir = Path(
-                self._netcdf_output_dir / f"{hemisphere}/{forecast_reference_date}"
-            )
+            if hemisphere:
+                ncdf_dir = Path(
+                    self._netcdf_output_dir / f"{hemisphere}" / f"{forecast_reference_date}"
+                )
+                cog_dir = Path(
+                    self._cogs_output_dir / f"{hemisphere}" / f"{forecast_reference_date}"
+                )
+                item_id = f"{hemisphere}_forecast_init_{forecast_reference_time_str}"
+            else:
+                ncdf_dir = Path(
+                    self._netcdf_output_dir / f"{forecast_reference_date}"
+                )
+                cog_dir = Path(
+                    self._cogs_output_dir / f"{forecast_reference_date}"
+                )
+                item_id = f"forecast_init_{forecast_reference_time_str}"
+
             ncdf_dir.mkdir(parents=True, exist_ok=True)
-            cog_dir = Path(
-                self._cogs_output_dir / f"{hemisphere}/{forecast_reference_date}"
-            )
             cog_dir.mkdir(parents=True, exist_ok=True)
 
-            item_id = f"{hemisphere}_forecast_init_{forecast_reference_time_str}"
 
             # Save the forecast init slice as a netcdf file
             out_nc_file = ncdf_dir / f"{item_id}.nc"

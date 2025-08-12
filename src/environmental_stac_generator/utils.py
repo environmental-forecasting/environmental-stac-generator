@@ -65,7 +65,9 @@ def get_hemisphere(netcdf_file: Path) -> str:
         lat_min = ds.attrs.get("geospatial_lat_min", None)
 
         if lat_min is None:
-            raise ValueError("NetCDF file does not contain geospatial information.")
+            logger.warning("netCDF does not contain `geospatial_lat_min`, "
+                        "cannot determine hemisphere")
+            return ""
 
         if 0 <= lat_min <= 90:
             return "north"

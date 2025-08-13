@@ -23,6 +23,8 @@ dependencies = [
     "numpy",
     "orjson",
     "prompt_toolkit==3.0.36",
+    "psycopg[pool,binary]",
+    "pypgstac",
     "pystac",
     "python-dotenv",
     "ipython==8.18.0",

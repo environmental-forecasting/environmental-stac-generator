@@ -21,6 +21,7 @@ dependencies = [
     "python-dateutil",
     "matplotlib",
     "numpy",
+    "orjson",
     "prompt_toolkit==3.0.36",
     "pystac",
     "python-dotenv",

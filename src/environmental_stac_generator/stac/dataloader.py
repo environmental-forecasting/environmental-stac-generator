@@ -1,7 +1,8 @@
 import logging
+import time
 from pathlib import Path
-from typing import Union
 
+import requests
 from pypgstac.db import PgstacDB
 from pypgstac.load import Loader, Methods
 from pystac import Catalog
@@ -11,21 +12,70 @@ logging.basicConfig(level=logging.INFO)
 
 
 class PGSTACDataLoader:
-    """
-    Ingest STAC metadata into a pgSTAC database using pypgstac's bulk loader.
-    """
+    """Loads STAC catalogs into a PostgreSQL database via the PgstacDB interface.
 
-    def __init__(self, pg_db_url: str):
+    This class provides methods to check existence of STAC collections/items,
+    load STAC catalogs from files, and ingest data into the PostgreSQL database.
+    It also includes functionality to wait for the STAC API to be accessible.
+
+    Attributes:
+        db: Instance of PgstacDB for interacting with PostgreSQL.
+        loader: Loader instance for ingesting STAC data.
+        stac_api_url: Base URL of the STAC API (without trailing slash).
+        session: Requests Session object for HTTP requests.
+    """
+    def __init__(self, pg_db_url: str, stac_api_url: str):
+        """Initialise PGSTACDataLoader with database and STAC API configurations.
+
+        Args:
+            pg_db_url: PostgreSQL database connection string.
+            stac_api_url: Base URL of the STAC API (without trailing slash).
+        """
         self.db = PgstacDB(dsn=pg_db_url)
         self.loader = Loader(self.db)
+        self.stac_api_url = stac_api_url.rstrip("/")
+        self.session = requests.Session()
 
-    def load_stac_catalog(
+    def collection_exists(self, collection_id: str) -> bool:
+        """Check if a STAC collection exists in the remote API.
+
+        Args:
+            collection_id: ID of the STAC collection to check.
+
+        Returns:
+            True if the collection exists (HTTP 200), False otherwise.
+        """
+        url = f"{self.stac_api_url}/collections/{collection_id}"
+        r = self.session.get(url)
+        return r.status_code == 200
+
+    def item_exists(self, collection_id: str, item_id: str) -> bool:
+        """Check if a STAC item exists in the remote API.
+
+        Args:
+            collection_id: ID of the STAC collection.
+            item_id: ID of the STAC item to check.
+
+        Returns:
+            True if the item exists (HTTP 200), False otherwise.
+        """
+        url = f"{self.stac_api_url}/collections/{collection_id}/items/{item_id}"
+        r = self.session.get(url)
+        return r.status_code == 200
+
+    def ingest_stac_catalog(
         self,
-        catalog_file: Union[str, Path],
+        catalog_file: str | Path,
         overwrite: bool = False,
     ) -> bool:
-        """
-        Load STAC collections and items from a catalog.json into the pgSTAC database.
+        """Load a STAC catalog from file into the PostgreSQL database.
+
+        Args:
+            catalog_file: Path to the STAC catalog JSON file.
+            overwrite: If True, existing collections/items will be overwritten.
+
+        Returns:
+            True if loading was successful, False otherwise.
         """
         catalog_file = Path(catalog_file)
         if not catalog_file.exists():
@@ -33,30 +83,103 @@ class PGSTACDataLoader:
             return False
 
         try:
-            catalog = Catalog.from_file(str(catalog_file))
+            self.catalog = Catalog.from_file(str(catalog_file))
+            self._load_collections_from_file(overwrite=overwrite)
         except Exception as e:
             logger.exception(f"Failed to read catalog: {e}")
-            return False
 
+        return False
+
+    def _load_collections_from_file(self, overwrite: bool = False) -> None:
+        """Process collections and items from the STAC catalog file.
+
+        Skips existing collections/items if overwrite is False. Used internally
+        by load_stac_catalog().
+
+        Args:
+            overwrite: If True, existing collections/items will be overwritten.
+        """
+        # Prepare collections to load (skip if exists and overwrite==False)
+        collections_to_load = []
+        for collection in self.catalog.get_all_collections():
+            if not overwrite and self.collection_exists(collection.id):
+                logger.info(f"Skipping existing collection {collection.id}")
+                continue
+            collections_to_load.append(collection.to_dict())
+
+        # Prepare items to load (skip if exists and overwrite==False)
+        items_to_load = []
+        for item in self.catalog.get_all_items():
+            if not overwrite and self.item_exists(item.collection_id, item.id):
+                logger.info(
+                    f"Skipping existing item {item.id} in collection {item.collection_id}"
+                )
+                continue
+            items_to_load.append(item.to_dict())
+
+        self._ingest_collection_and_items(collections_to_load, items_to_load, overwrite)
+
+    def _ingest_collection_and_items(
+        self, collections_to_load: list, items_to_load: list, overwrite: bool
+    ) -> bool:
+        """Ingest STAC collections and items into PostgreSQL.
+
+        Args:
+            collections_to_load: List of collection dictionaries to load.
+            items_to_load: List of item dictionaries to load.
+            overwrite: If True, use upsert mode; otherwise, insert only.
+
+        Returns:
+            True if ingestion was successful, False otherwise.
+        """
         insert_mode = Methods.upsert if overwrite else Methods.insert
-
         try:
-            # Load collections
-            collections = list(catalog.get_all_collections())
-            collection_dicts = [c.to_dict() for c in collections]
-            self.loader.load_collections(
-                file=iter(collection_dicts), insert_mode=insert_mode
-            )
-            logger.info(f"Loaded {len(collection_dicts)} collections")
+            # Load collections via your existing loader
+            if collections_to_load:
+                self.loader.load_collections(
+                    file=iter(collections_to_load), insert_mode=insert_mode
+                )
+                logger.info(f"Loaded {len(collections_to_load)} collections")
+            else:
+                logger.info("No collections to load")
 
-            # Load items
-            items = list(catalog.get_all_items())
-            item_dicts = (i.to_dict() for i in items)
-            self.loader.load_items(file=item_dicts, insert_mode=insert_mode)
-            logger.info(f"Loaded {len(items)} items")
+            # Load items via your existing loader
+            if items_to_load:
+                self.loader.load_items(
+                    file=iter(items_to_load), insert_mode=insert_mode
+                )
+                logger.info(f"Loaded {len(items_to_load)} items")
+            else:
+                logger.info("No items to load")
 
             return True
-
         except Exception as e:
             logger.exception(f"Failed to load STAC catalog: {e}")
             return False
+
+    def wait_for_api(self, max_retries: int = 30, delay: int = 10) -> bool:
+        """Wait for the STAC API to become accessible.
+
+        Periodically checks if the STAC API is reachable by making a GET request
+        to its root endpoint. Retries up to max_retries times with specified delay.
+
+        Args:
+            max_retries: Maximum number of attempts.
+            delay: Delay between retries in seconds.
+
+        Returns:
+            True if the API becomes accessible, False otherwise.
+        """
+        for i in range(max_retries):
+            logging.info(f"{i}")
+            try:
+                response = self.session.get(f"{self.stac_api_url}/")
+                if response.status_code == 200:
+                    logger.info("STAC API is accessible")
+                    return True
+            except requests.exceptions.RequestException as e:
+                logger.info(f"Waiting for STAC API... (attempt {i + 1}/{max_retries})")
+                time.sleep(delay)
+
+        logger.error("STAC API not accessible after maximum retries")
+        return False

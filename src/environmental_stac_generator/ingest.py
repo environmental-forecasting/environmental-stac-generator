@@ -54,18 +54,12 @@ def main(catalog: str, overwrite: bool = False) -> None:
         f"@{db_info['HOST_IP']}:{db_info['DATABASE_PORT']}/{db_info['DATABASE_DBNAME']}"
     )
 
+    # stac_api_url = os.getenv("STAC_FASTAPI_URL", None) # E.g. "http://localhost:8081"
+    # if not stac_api_url:
+    #     logger.error("No STAC API URL specified in environment variable 'STAC_FASTAPI_URL'")
+    #     exit(1)
 
-    stac_api_url = os.getenv("STAC_FASTAPI_URL", None) # E.g. "http://localhost:8081"
-    if not stac_api_url:
-        logger.error("No STAC API URL specified in environment variable 'STAC_FASTAPI_URL'")
-        exit(1)
-
-    loader = PGSTACDataLoader(pg_db_url, stac_api_url)
-
-    # Wait for "stac-fastapi" to be ready
-    if not loader.wait_for_api():
-        logger.error("STAC API not available, exiting")
-        return
+    loader = PGSTACDataLoader(pg_db_url)
 
     # Actually load the STAC metadata into PgSTAC database
     loader.ingest_stac_catalog(catalog_file=catalog, overwrite=overwrite)

@@ -162,6 +162,7 @@ def proj_to_geo(bbox_projected: list[float], src_crs: str) -> list[float]:
 
     return bbox
 
+
 def ensure_utc(datetime: dt) -> dt:
     """
     Ensures a datetime object is timezone-aware in UTC.
@@ -181,3 +182,26 @@ def ensure_utc(datetime: dt) -> dt:
     elif datetime.tzinfo is None:
         return datetime.replace(tzinfo=tzutc())
     return datetime.astimezone(tzutc())
+
+
+def format_time(datetime: dt, utc: bool=True, with_seconds: bool=True) -> str:
+    """
+    Format a datetime object into a filename-safe ISO-like string.
+
+    This function formats the datetime using hyphens instead of colons,
+    making it safe for use in filenames and S3 keys. It optionally includes
+    seconds and appends a 'Z' to indicate UTC time.
+
+    Args:
+        datetime: The datetime object to format.
+        utc (optional): If True, appends 'Z' to indicate UTC.
+            Defaults to True.
+        with_seconds (optional): If True, includes seconds in the output.
+            Defaults to True.
+
+    Returns:
+        A formatted datetime string, e.g. "2025-08-14T06-00-00Z".
+    """
+    fmt = "%Y-%m-%dT%H-%M" + ("-%S" if with_seconds else "")
+    result = datetime.strftime(fmt)
+    return result + "Z" if utc else result

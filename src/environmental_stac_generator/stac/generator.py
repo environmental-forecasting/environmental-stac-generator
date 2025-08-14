@@ -27,6 +27,7 @@ from ..utils import (
     parse_forecast_frequency,
     proj_to_geo,
     ensure_utc,
+    format_time,
 )
 
 logger = logging.getLogger(__name__)
@@ -672,9 +673,8 @@ class STACGenerator(BaseSTAC):
             forecast_reference_time_str_2 = forecast_reference_time.strftime(
                 "%Y-%m-%d %H:%M"
             )
-            # forecast_reference_time_str_3 = forecast_reference_time.strftime(
-            #     "%Y-%m-%dT%H:%M:%SZ"
-            # )
+            forecast_reference_time_str_3 = format_time(forecast_reference_time)
+
             forecast_end_time = forecast_reference_time + relativedelta(
                 **{leadtime_unit: nleadtime - 1} # type: ignore
             )
@@ -690,13 +690,13 @@ class STACGenerator(BaseSTAC):
             cog_dir = Path(
                 self._cogs_output_dir / f"{forecast_reference_date}"
             )
-            item_id = f"forecast_init_{forecast_reference_time_str}"
+            item_id = f"forecast_init_{forecast_reference_time_str_3}"
 
             ncdf_dir.mkdir(parents=True, exist_ok=True)
             cog_dir.mkdir(parents=True, exist_ok=True)
 
             # Save the forecast init slice as a netcdf file
-            out_nc_file = ncdf_dir / f"{item_id}.nc"
+            out_nc_file = ncdf_dir / f"{forecast_reference_time_str_3}.nc"
 
             # Write the netCDF file in addition to the STAC json output
             if not stac_only:

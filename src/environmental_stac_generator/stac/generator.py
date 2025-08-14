@@ -622,8 +622,8 @@ class STACGenerator(BaseSTAC):
         collection = self.get_or_create_collection(
             parent=catalog,
             collection_id=name,
-            title=f"Model Collection: {name}",
-            description=f"{name} collection",
+            title=f"{name}",
+            description=f"{name.capitalize().replace("_", " ").replace("-", " ")} collection",
             bbox=bbox,
             extra_fields = {"custom:hemisphere": hemisphere} if hemisphere else None,
             license=self._license,

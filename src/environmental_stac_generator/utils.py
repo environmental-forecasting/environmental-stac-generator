@@ -1,8 +1,10 @@
 import logging
 import re
 from pathlib import Path
+from datetime import datetime as dt
 
 import xarray as xr
+from dateutil.tz import tzutc
 from rasterio.crs import CRS
 from rasterio.warp import transform_bounds
 
@@ -159,3 +161,23 @@ def proj_to_geo(bbox_projected: list[float], src_crs: str) -> list[float]:
     bbox = transform_bounds(src_crs, CRS.from_epsg(4326), *bbox_projected)  # type: ignore
 
     return bbox
+
+def ensure_utc(datetime: dt) -> dt:
+    """
+    Ensures a datetime object is timezone-aware in UTC.
+
+    If the input datetime is None, returns None. If the datetime is naive
+    (no timezone info), attaches UTC timezone. If already timezone-aware,
+    converts to UTC equivalent.
+
+    Args:
+        dt: A datetime object, or None.
+
+    Returns:
+        datetime: The datetime object with UTC timezone, or None if input was None.
+    """
+    if datetime is None:
+        return None
+    elif datetime.tzinfo is None:
+        return datetime.replace(tzinfo=tzutc())
+    return datetime.astimezone(tzutc())

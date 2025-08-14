@@ -25,6 +25,7 @@ from ..utils import (
     get_hemisphere,
     parse_forecast_frequency,
     proj_to_geo,
+    ensure_utc,
 )
 
 logger = logging.getLogger(__name__)
@@ -185,7 +186,25 @@ class BaseSTAC:
                 ),
             )
             parent.add_child(collection)
-        return collection # type: ignore
+        else:
+            # Update the existing collection's temporal extent
+            existing_intervals = collection.extent.temporal.intervals[0]
+            existing_start, existing_end = existing_intervals
+
+            existing_start = ensure_utc(existing_start)
+            existing_end = ensure_utc(existing_end)
+            new_start = ensure_utc(temporal_extent[0])
+            new_end = ensure_utc(temporal_extent[1])
+
+            # Compute min start and max end (handle None values)
+            updated_start = min(filter(None, [existing_start, new_start]))
+            updated_end = max(filter(None, [existing_end, new_end]))
+
+            # Update only if the extent has changed
+            if (existing_start != updated_start) or (existing_end != updated_end):
+                collection.extent.temporal.intervals = [[updated_start, updated_end]]
+
+        return collection  # type: ignore
 
     def get_or_create_item(
         self,

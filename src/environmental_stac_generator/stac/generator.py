@@ -1,8 +1,10 @@
 import logging
 import os
 from abc import abstractmethod
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import orjson
@@ -16,7 +18,6 @@ from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
 from shapely.geometry import box, mapping
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor
 
 from ..cog import write_cog
 from ..utils import (
@@ -145,6 +146,7 @@ class BaseSTAC:
         description: str,
         bbox: list,
         temporal_extent: list,
+        extra_fields: dict[str, Any] | None = None,
         license: str = "other",
     ) -> Collection:
         """
@@ -175,6 +177,7 @@ class BaseSTAC:
                 id=collection_id,
                 title=title,
                 description=description,
+                extra_fields=extra_fields,
                 license=license,
                 extent=pystac.Extent(
                     pystac.SpatialExtent([bbox]),
@@ -568,8 +571,7 @@ class STACGenerator(BaseSTAC):
 
         Processes the input netCDF file to extract metadata, create STAC Items
         representing each forecast leadtime, and generate associated COG assets.
-        Creates a STAC structure with collections for model name,
-        hemisphere, and forecast date.
+        Creates a STAC structure with collections for model name and forecast date.
 
         Args:
             nc_file: Path to the input netCDF file.
@@ -623,6 +625,7 @@ class STACGenerator(BaseSTAC):
             title=f"Model Collection: {name}",
             description=f"{name} collection",
             bbox=bbox,
+            extra_fields = {"custom:hemisphere": hemisphere} if hemisphere else None,
             license=self._license,
             temporal_extent=[time_coords_start, time_coords_end],
         )
@@ -647,26 +650,16 @@ class STACGenerator(BaseSTAC):
             forecast_end_time_str_fmt = forecast_end_time.strftime("%Y-%m-%d %H:%M")
 
             # Create output dirs
-            if hemisphere:
-                ncdf_dir = Path(
-                    self._netcdf_output_dir / f"{hemisphere}" / f"{forecast_reference_date}"
-                )
-                cog_dir = Path(
-                    self._cogs_output_dir / f"{hemisphere}" / f"{forecast_reference_date}"
-                )
-                item_id = f"{hemisphere}_forecast_init_{forecast_reference_time_str}"
-            else:
-                ncdf_dir = Path(
-                    self._netcdf_output_dir / f"{forecast_reference_date}"
-                )
-                cog_dir = Path(
-                    self._cogs_output_dir / f"{forecast_reference_date}"
-                )
-                item_id = f"forecast_init_{forecast_reference_time_str}"
+            ncdf_dir = Path(
+                self._netcdf_output_dir / f"{forecast_reference_date}"
+            )
+            cog_dir = Path(
+                self._cogs_output_dir / f"{forecast_reference_date}"
+            )
+            item_id = f"forecast_init_{forecast_reference_time_str}"
 
             ncdf_dir.mkdir(parents=True, exist_ok=True)
             cog_dir.mkdir(parents=True, exist_ok=True)
-
 
             # Save the forecast init slice as a netcdf file
             out_nc_file = ncdf_dir / f"{item_id}.nc"
@@ -686,9 +679,6 @@ class STACGenerator(BaseSTAC):
                 ),
                 "forecast:leadtime": leadtime,
             }
-
-            if hemisphere:
-                properties |= {"custom:hemisphere": hemisphere}
 
             # Add STAC Item for this netCDF file
             item = self.get_or_create_item(

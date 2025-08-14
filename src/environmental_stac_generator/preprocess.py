@@ -30,7 +30,7 @@ def main(
     Args:
         forecast_frequency: The frequency of forecasts.
         input: List of input netCDF files or directories.
-        name: Collection name.
+        name: Collection name and main catalog output filename.
         workers: Max number of concurrent workers.
         overwrite: Whether to overwrite existing COG files.
         no_compress: Disable COG compression.
@@ -73,7 +73,7 @@ def main(
         logger.warning("No netCDF files found for processing")
         raise FileNotFoundError(f"{input} is invalid")
 
-    stac_generator = STACGenerator()
+    stac_generator = STACGenerator(catalog_name=name)
 
     for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):  # type: ignore
         pbar.set_description(f"Processing {nc_file}")

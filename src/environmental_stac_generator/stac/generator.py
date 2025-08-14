@@ -38,7 +38,7 @@ class BaseSTAC:
         self,
         data_path: Path = Path("data"),
         catalog_defs: dict | None = None,
-        stac_catalog_file: Path | None = None,
+        catalog_name: str = "default",
         license: str | None = None,
     ):
         """
@@ -51,10 +51,9 @@ class BaseSTAC:
             catalog_defs (optional): Dictionary of metadata for the root STAC catalog.
                 If not provided, defaults to a standard BAS environmental forecast catalog
                 definition.
-            stac_catalog_file (optional): The path where the generated STAC catalog JSON
+            catalog_name (optional): The catalog dir where the generated STAC catalog JSON
                 file should be saved.
-                If not provided, it will be created based on the data_path or other internal
-                logic.
+                Defaults to "default".
             license (optional): SPDX license identifier for the items in the STAC catalog.
                 Defaults to `"OGL-UK-3.0"` if not provided.
         """
@@ -71,7 +70,7 @@ class BaseSTAC:
         )  # Ref: https://spdx.org/licenses/
 
         self._load_dotenv()
-        self._set_catalog_path(stac_catalog_file=stac_catalog_file)
+        self._set_catalog_path(catalog_name=catalog_name)
         self.get_or_create_catalog(catalog_defs=catalog_defs)
 
     def _load_dotenv(self) -> None:
@@ -87,7 +86,7 @@ class BaseSTAC:
         self._FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", None)
         logger.info(f"FILE_SERVER_URL: {self._FILE_SERVER_URL}")
 
-    def _set_catalog_path(self, stac_catalog_file=None) -> None:
+    def _set_catalog_path(self, catalog_name: str) -> None:
         """
         Configure the STAC output directory and catalog file path.
 
@@ -96,17 +95,15 @@ class BaseSTAC:
         catalog file name. Otherwise, uses the specified file path.
 
         Args:
-            stac_catalog_file: Optional path to use for the STAC catalog file.
-                If None, defaults to 'catalog.json' in the STAC output directory.
+            catalog_file_name: Optional dirname to use where the STAC catalog file
+                will be saved.
+                If None, defaults to 'default' in the STAC output directory.
         """
         # This has dir with `name` created by itself
-        self._stac_output_dir = self.data_path / "stac"
+        self._stac_output_dir = self.data_path / "stac" / catalog_name
         self._stac_output_dir.mkdir(parents=True, exist_ok=True)
 
-        if not stac_catalog_file:
-            self._stac_catalog_file = Path(self._stac_output_dir) / "catalog.json"
-        else:
-            self._stac_catalog_file = stac_catalog_file
+        self._stac_catalog_file = Path(self._stac_output_dir) / "catalog.json"
 
     def get_or_create_catalog(
         self, catalog_defs: dict, describe: bool = True
@@ -317,7 +314,7 @@ class BaseSTAC:
         Args:
             stac_output_dir: Directory path where STAC catalog files will be saved.
         """
-        self._stac_catalog.normalize_hrefs(str(stac_output_dir))
+        self._stac_catalog.normalize_hrefs(str(self._stac_catalog_file))
         self._stac_catalog.save()
 
     @property

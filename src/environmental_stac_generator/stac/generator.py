@@ -16,6 +16,7 @@ from deepdiff import DeepDiff
 from dotenv import load_dotenv
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
+from pystac.utils import datetime_to_str, str_to_datetime
 from shapely.geometry import box, mapping
 from tqdm import tqdm
 
@@ -212,9 +213,11 @@ class BaseSTAC:
         item_id: str,
         geometry: dict,
         bbox: list,
-        datetime: datetime,
         crs: str,
         properties: dict,
+        datetime: datetime,
+        start_datetime: datetime | None = None,
+        end_datetime: datetime | None = None,
     ) -> Item:
         """
         Retrieve or create a STAC Item within the given parent collection.
@@ -229,9 +232,9 @@ class BaseSTAC:
             item_id: Unique identifier for the STAC Item.
             geometry: GeoJSON-like dictionary representing item geometry.
             bbox: Bounding box [west, south, east, north] in WGS84 coordinates.
-            datetime: Datetime object representing item temporal extent.
             crs: Coordinate Reference System code (e.g., "EPSG:4326").
             properties: Additional metadata properties for the item.
+            datetime: Datetime object representing item temporal extent.
 
         Returns:
             Item: The created STAC Item with associated Asset and extensions.
@@ -242,8 +245,13 @@ class BaseSTAC:
                 id=item_id,
                 geometry=geometry,
                 bbox=bbox,
-                datetime=datetime,
                 properties=properties,
+                datetime=datetime,
+                # # Setting following will mean that when filtering time in STAC Browser,
+                # # it would show any forecast inits with leadtimes that overlap with
+                # # the selected time range, so, not setting a time range.
+                # start_datetime=start_datetime,
+                # end_datetime=end_datetime,
             )
             # Add projection extension
             ProjectionExtension.add_to(item)
@@ -635,7 +643,7 @@ class STACGenerator(BaseSTAC):
             time_coords_end,
             leadtime_coords,
         ) = self.get_forecast_info(nc_file)
-        leadtime = len(leadtime_coords)
+        nleadtime = len(leadtime_coords)
 
         # Create (or retrieve) highest level collection (model name) within the catalog
         collection = self.get_or_create_collection(
@@ -657,16 +665,23 @@ class STACGenerator(BaseSTAC):
             # is the first forecast being predicted
             forecast_reference_time = pd.to_datetime(time_val.values)
             forecast_reference_date = forecast_reference_time.date()
-            forecast_reference_time_str = forecast_reference_time.strftime(
-                "%Y%m%d_%H%M"
+            forecast_reference_time_str = datetime_to_str(forecast_reference_time)
+            forecast_reference_time_str_1 = forecast_reference_time.strftime(
+                "%Y-%m-%d_%H:%M"
             )
-            forecast_reference_time_str_fmt = forecast_reference_time.strftime(
+            forecast_reference_time_str_2 = forecast_reference_time.strftime(
                 "%Y-%m-%d %H:%M"
             )
+            # forecast_reference_time_str_3 = forecast_reference_time.strftime(
+            #     "%Y-%m-%dT%H:%M:%SZ"
+            # )
             forecast_end_time = forecast_reference_time + relativedelta(
-                **{leadtime_unit: leadtime - 1} # type: ignore
+                **{leadtime_unit: nleadtime - 1} # type: ignore
             )
-            forecast_end_time_str_fmt = forecast_end_time.strftime("%Y-%m-%d %H:%M")
+            forecast_end_time_str = datetime_to_str(forecast_end_time)
+            # forecast_end_time_str_1 = forecast_end_time.strftime("%Y-%m-%d_%H:%M")
+            # forecast_end_time_str_2 = forecast_end_time.strftime("%Y-%m-%d %H:%M")
+            # forecast_end_time_str_3 = forecast_end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
             # Create output dirs
             ncdf_dir = Path(
@@ -690,13 +705,9 @@ class STACGenerator(BaseSTAC):
                     self._write_netcdf(ds_time_slice, out_nc_file)
 
             properties={
-                "forecast:reference_time": forecast_reference_time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                ),
-                "forecast:end_time": forecast_end_time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                ),
-                "forecast:leadtime": leadtime,
+                "forecast:reference_time": forecast_reference_time_str,
+                "forecast:end_time": forecast_end_time_str,
+                "forecast:leadtime_length": nleadtime,
             }
 
             # Add STAC Item for this netCDF file
@@ -706,6 +717,8 @@ class STACGenerator(BaseSTAC):
                 geometry=geometry,
                 bbox=bbox,
                 datetime=forecast_reference_time,
+                start_datetime=forecast_reference_time,
+                end_datetime=forecast_end_time,
                 crs=crs,
                 properties=properties,
             )
@@ -716,10 +729,15 @@ class STACGenerator(BaseSTAC):
                 Asset(
                     href=str(out_nc_file),
                     media_type=pystac.MediaType.NETCDF,
-                    title=f"Full forecast netCDF from {forecast_reference_time_str_fmt}",
+                    title=f"Full forecast netCDF from {forecast_reference_time_str_2}",
                     description="netCDF file container forecast variables for forecast"
-                                f" initialised at: {forecast_reference_time_str_fmt}",
+                                f" initialised at: {forecast_reference_time_str}",
                     roles=["data"],
+                    extra_fields={
+                        "forecast:reference_time": forecast_reference_time_str,
+                        "forecast:end_time": forecast_end_time_str,
+                        "forecast:leadtime_length": nleadtime,
+                    }
                 ),
             )
 
@@ -740,9 +758,9 @@ class STACGenerator(BaseSTAC):
 
             # Process each leadtime
             with ProcessPoolExecutor(max_workers=workers) as executor:
-                with tqdm(total=leadtime, desc="COGifying files", leave=True) as pbar:
+                with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
                     futures = []
-                    for i in range(leadtime):
+                    for i in range(nleadtime):
                         future = executor.submit(
                             self._process_leadtime, i, *process_args
                         )
@@ -819,11 +837,13 @@ class STACGenerator(BaseSTAC):
             x_dim=x_coord, y_dim=y_coord, inplace=True
         )
 
-        valid_time_str = valid_time.strftime("%Y%m%d_%H%M")
-        valid_time_str_fmt = valid_time.strftime("%Y-%m-%d %H:%M")
+        valid_time_str = datetime_to_str(valid_time)
+        valid_time_str_1 = valid_time.strftime("%Y-%m-%d_%H%M")
+        valid_time_str_2 = valid_time.strftime("%Y-%m-%d %H:%M")
+        valid_time_str_3 = valid_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Add STAC Item for this file
-        item_id_cog = f"{item.id}_lead_{valid_time_str}"
+        item_id_cog = f"{item.id}_lead_{valid_time_str_1}"
 
         # Define cog/thumbnail output paths
         cog_file = cog_dir / f"{item_id_cog}.tif"
@@ -866,11 +886,11 @@ class STACGenerator(BaseSTAC):
         assets = []
         # Add COG asset to item
         cog_asset = dict(
-            key=valid_time_str_fmt,
+            key=valid_time_str,
             asset=Asset(
                 href=str(cog_file),
                 media_type=pystac.MediaType.COG,
-                title=f"Forecast at {valid_time_str_fmt}",
+                title=f"Forecast at {valid_time_str_2}",
                 description=f"Variables: {', '.join(band_names)}",
                 roles=["data"],
                 extra_fields={

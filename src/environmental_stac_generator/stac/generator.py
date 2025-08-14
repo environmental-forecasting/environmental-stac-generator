@@ -387,7 +387,6 @@ class STACGenerator(BaseSTAC):
         config_data = {
             self._collection_name: {
                 "forecast_frequency": self._forecast_frequency,
-                "not_flat": self._not_flat,
             }
         }
         self._store_config(config_data)
@@ -561,7 +560,6 @@ class STACGenerator(BaseSTAC):
         forecast_frequency: str = "1days",
         compress: bool = True,
         overwrite: bool = False,
-        not_flat: bool = True,
         stac_only: bool = False,
         workers: int = 1,
     ) -> None:
@@ -571,7 +569,7 @@ class STACGenerator(BaseSTAC):
         Processes the input netCDF file to extract metadata, create STAC Items
         representing each forecast leadtime, and generate associated COG assets.
         Creates a STAC structure with collections for model name,
-        hemisphere (hierarchical structure if not_flat is True), and forecast date.
+        hemisphere, and forecast date.
 
         Args:
             nc_file: Path to the input netCDF file.
@@ -582,8 +580,6 @@ class STACGenerator(BaseSTAC):
                 Defaults to True.
             overwrite: Whether to overwrite existing files.
                 Defaults to False.
-            not_flat: Whether to create a hierarchical STAC structure with hemispheres.
-                Defaults to True.
             stac_only: If True, only generate STAC without writing netCDF/COG files.
                 Defaults to False
             workers: Number of parallel processes for COG generation.
@@ -592,7 +588,6 @@ class STACGenerator(BaseSTAC):
         self._collection_name = name
         self._forecast_frequency = forecast_frequency
         self._compress_method = "DEFLATE" if compress else "NONE"
-        self._not_flat = not_flat
         nc_file = Path(nc_file).resolve()
         hemisphere = get_hemisphere(nc_file)
 
@@ -622,7 +617,7 @@ class STACGenerator(BaseSTAC):
         leadtime = len(leadtime_coords)
 
         # Create (or retrieve) highest level collection (model name) within the catalog
-        main_collection = self.get_or_create_collection(
+        collection = self.get_or_create_collection(
             parent=catalog,
             collection_id=name,
             title=f"Model Collection: {name}",
@@ -631,21 +626,6 @@ class STACGenerator(BaseSTAC):
             license=self._license,
             temporal_extent=[time_coords_start, time_coords_end],
         )
-
-        if not_flat and hemisphere:
-            DeprecationWarning(
-                "Run with `-nf`/`--not-flat` flag, this is not supported for ingestion"
-                " into pgSTAC database, only stac-browser"
-            )
-            # Create (or retrieve) a hemisphere collection within the main collection
-            hemisphere_collection = self.get_or_create_collection(
-                parent=main_collection,
-                collection_id=hemisphere,
-                title=f"Hemisphere Collection: {hemisphere.capitalize()}",
-                description=f"{hemisphere.capitalize()} hemisphere collection",
-                bbox=bbox,
-                temporal_extent=[time_coords_start, time_coords_end],
-            )
 
         ds = xr.open_dataset(nc_file, decode_coords="all")
         for time_idx, time_val in enumerate(time_coords):
@@ -665,19 +645,6 @@ class STACGenerator(BaseSTAC):
                 **{leadtime_unit: leadtime - 1} # type: ignore
             )
             forecast_end_time_str_fmt = forecast_end_time.strftime("%Y-%m-%d %H:%M")
-
-            if not_flat and hemisphere:
-                # Create (or retrieve) a forecast collection within the catalog
-                forecast_collection = self.get_or_create_collection(
-                    parent=hemisphere_collection,
-                    collection_id=f"{forecast_reference_date}",
-                    title=f"Forecast Collection: {forecast_reference_date}",
-                    description=f"Forecast data for {forecast_reference_date}",
-                    bbox=bbox,
-                    temporal_extent=[forecast_reference_time, forecast_end_time],
-                )
-
-            collection = forecast_collection if not_flat else main_collection
 
             # Create output dirs
             if hemisphere:

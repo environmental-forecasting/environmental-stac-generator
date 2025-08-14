@@ -33,12 +33,6 @@ def preprocess(
         "--no-compress",
         help="Disable COG compression (default is compressed)",
     ),
-    not_flat: bool = typer.Option(
-        False,
-        "-nf",
-        "--not-flat",
-        help="Output hierarchial STAC JSON (default is flat for pgSTAC compatibility)",
-    ),
     stac_only: bool = typer.Option(
         False,
         "-s",
@@ -54,7 +48,6 @@ def preprocess(
         workers=workers,
         overwrite=overwrite,
         no_compress=no_compress,
-        not_flat=not_flat,
         stac_only=stac_only,
     )
 

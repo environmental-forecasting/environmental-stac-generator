@@ -146,7 +146,7 @@ class PGSTACDataLoader:
         # Prepare items to load (skip if exists and overwrite==False)
         items_to_load = []
         for item in self.catalog.get_all_items():
-            if not overwrite and self.item_exists(item.collection_id, item.id):
+            if not overwrite and self.item_exists(item.collection_id, item.id): # type: ignore
                 logger.info(
                     f"Skipping existing item {item.id} in collection {item.collection_id}"
                 )

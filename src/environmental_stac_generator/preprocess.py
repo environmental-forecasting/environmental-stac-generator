@@ -19,7 +19,6 @@ def main(
     workers: int,
     overwrite: bool,
     no_compress: bool,
-    not_flat: bool,
     stac_only: bool,
 ):
     """
@@ -35,7 +34,6 @@ def main(
         workers: Max number of concurrent workers.
         overwrite: Whether to overwrite existing COG files.
         no_compress: Disable COG compression.
-        not_flat: Output hierarchical STAC JSON.
         stac_only: Output only the STAC files.
 
     Raises:
@@ -45,8 +43,8 @@ def main(
         None
 
     Examples:
-        For daily forecasting, with a flat STAC structure for pgSTAC
-        >>> dashboard preprocess 1days raw_data/*.nc -o -f
+        To output a catalog for daily forecasting:
+        >>> dashboard preprocess 1days raw_data/*.nc -o -f --name icenet
     """
     if input is None:
         default_dir = "results/predict"
@@ -85,7 +83,6 @@ def main(
             compress=no_compress,
             overwrite=overwrite,
             forecast_frequency=forecast_frequency,
-            not_flat=not_flat,
             stac_only=stac_only,
             workers=workers,
         )

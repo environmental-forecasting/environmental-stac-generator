@@ -1,3 +1,4 @@
+import hashlib
 import mimetypes
 import os
 
@@ -5,7 +6,50 @@ import rasterio
 import xarray as xr
 import zarr
 from pystac import Asset
+from multiformats import multihash
 from pystac.extensions.file import FileExtension
+
+
+def file_multihash(file_path: str) -> str:
+    """Computes a multihash-encoded MD5 digest of the entire file.
+
+    Reads the entire contents of a file into memory (should only be
+    used for small files) and returns the hexadecimal representation
+    of the multihash digest.
+
+    Args:
+        file_path: Path to the file to hash.
+
+    Returns:
+        Hexadecimal string of the multihash-encoded MD5 digest.
+    """
+    with open(file_path, "rb") as f:
+        data = f.read()
+    # Compute multihash-encoded digest
+    digest = multihash.digest(data, "md5")
+    return digest.hex()
+
+
+def file_block_multihash(file_path: str, block_size=8192) -> str:
+    """Computes a multihash-encoded MD5 digest over a file in blocks.
+
+    Reads the file in chunks and computes an MD5 digest incrementally,
+    allowing processing of large files without loading the entire file into memory.
+
+    Args:
+        file_path: Path to the file to hash.
+        block_size (optional): Size of each block to read from the file in bytes.
+            Defaults to 8192.
+
+    Returns:
+        Hexadecimal string of the final multihash-encoded MD5 digest.
+    """
+    hash_md5 = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(block_size), b""):
+            hash_md5.update(chunk)
+    digest = multihash.digest(hash_md5.digest(), "md5")
+    return digest.hex()
 
 
 def add_file_info_to_asset(asset: Asset, file_path: str) -> Asset:
@@ -35,6 +79,8 @@ def add_file_info_to_asset(asset: Asset, file_path: str) -> Asset:
         file_ext.size = total_size
     else:
         file_ext.size = os.path.getsize(file_path)
+
+    file_ext.checksum = file_block_multihash(file_path)
 
     # Add media type if missing
     if asset.media_type is None:

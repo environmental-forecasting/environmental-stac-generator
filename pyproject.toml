@@ -20,6 +20,7 @@ dependencies = [
     "deepdiff",
     "python-dateutil",
     "matplotlib",
+    "multiformats",
     "numpy",
     "orjson",
     "prompt_toolkit==3.0.36",

@@ -29,6 +29,7 @@ from ..utils import (
     ensure_utc,
     format_time,
 )
+from .utils import add_file_info_to_asset
 
 logger = logging.getLogger(__name__)
 
@@ -719,11 +720,11 @@ class STACGenerator(BaseSTAC):
                 crs=crs,
                 properties=properties,
             )
+            # Add file extension
+            item.ext.add("file")
 
             # Add netCDF asset to item
-            item.add_asset(
-                "netcdf",
-                Asset(
+            nc_asset = Asset(
                     href=str(out_nc_file),
                     media_type=pystac.MediaType.NETCDF,
                     title=f"Full forecast netCDF from {forecast_reference_time_str_2}",
@@ -735,8 +736,10 @@ class STACGenerator(BaseSTAC):
                         "forecast:end_time": forecast_end_time_str,
                         "forecast:leadtime_length": nleadtime,
                     }
-                ),
-            )
+                )
+
+            item.add_asset(key="netcdf", asset=nc_asset)
+            nc_asset = add_file_info_to_asset(nc_asset, nc_asset.href)
 
             process_args = (
                 forecast_reference_time,
@@ -770,6 +773,7 @@ class STACGenerator(BaseSTAC):
                         pbar.set_description(pbar_description)
                         for asset in assets:
                             item.add_asset(key=asset["key"], asset=asset["asset"])
+                            add_file_info_to_asset(asset["asset"], asset["asset"].href)
                             # Use the first thumbnail generated for this item as the
                             # thumbnail for the collection as well.
                             if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:

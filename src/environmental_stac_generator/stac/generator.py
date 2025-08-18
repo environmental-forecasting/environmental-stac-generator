@@ -856,11 +856,23 @@ class STACGenerator(BaseSTAC):
         # (for thumbnail)
         da_list = []
         band_names = valid_bands
+        band_metadata = []
         for var_name in band_names:
             da_variable = ds_leadtime_slice[var_name]
             da_variable.rio.write_crs(crs, inplace=True)
             da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+
             da_list.append(da_variable)
+
+            # Compute variable min/max
+            band_min = float(da_variable.min().item()) if da_variable.size > 0 else None
+            band_max = float(da_variable.max().item()) if da_variable.size > 0 else None
+
+            band_metadata.append({
+                "name": var_name,
+                "min": band_min,
+                "max": band_max,
+            })
 
         if not stac_only:
             # Stack variables as a single dataset
@@ -897,7 +909,7 @@ class STACGenerator(BaseSTAC):
                 description=f"Variables: {', '.join(band_names)}",
                 roles=["data"],
                 extra_fields={
-                    "forecast:bands": [{"name": name} for name in band_names],
+                    "forecast:bands": band_metadata,
                     "custom:leadtime": i,
                     "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 },

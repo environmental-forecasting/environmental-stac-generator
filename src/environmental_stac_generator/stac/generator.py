@@ -29,7 +29,7 @@ from ..utils import (
     ensure_utc,
     format_time,
     get_da_statistics,
-
+    is_jsonable,
 )
 from .utils import add_file_info_to_asset
 
@@ -881,6 +881,13 @@ class STACGenerator(BaseSTAC):
 
             da_list.append(da_variable)
             metadata = {"name": var_name}
+            nc_attrs = da_variable.attrs
+
+            # Add all attributes found to metadata if it can be
+            # serialised.
+            for key, attr in nc_attrs.items():
+                if is_jsonable(attr):
+                    metadata[key] = attr
 
             # Only include statistics if not reprojecting, else stats will be different
             # would need to add after reprojecting.

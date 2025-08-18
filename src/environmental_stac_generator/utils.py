@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime as dt
 
 import numpy as np
+import orjson
 import xarray as xr
 from dateutil.tz import tzutc
 from rasterio.crs import CRS
@@ -256,3 +257,14 @@ def get_da_statistics(da: xr.DataArray) -> dict:
         # What percent of the pixels in a band are valid (i.e., non-NaN / non-nodata)
         "STATISTICS_VALID_PERCENT": band_valid_percent,
     }
+
+
+def is_jsonable(x):
+    """
+    Check if a value can be serialised to JSON
+    """
+    try:
+        orjson.dumps(x)
+        return True
+    except (TypeError, OverflowError):
+        return False

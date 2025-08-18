@@ -804,6 +804,7 @@ class STACGenerator(BaseSTAC):
         item: pystac.Item,
         valid_bands: list[str],
         overwrite: bool,
+        reproject: bool=False,
     ):
         """
         Process a single leadtime slice to generate COG and thumbnail assets.
@@ -823,6 +824,8 @@ class STACGenerator(BaseSTAC):
             valid_bands: List of valid variable names to process.
                 i.e., having 4 dimensions (time, yc, xc, leadtime).
             overwrite: Whether to overwrite existing files.
+            reproject: Whether to reproject to EPSG:4326.
+                Defaults to False.
 
         Returns:
             Tuple containing:
@@ -884,7 +887,7 @@ class STACGenerator(BaseSTAC):
             else:
                 pbar_description = f"Saving vars to multi-band COG: {cog_file}"
 
-                self._write_cog(da_multiband, x_coord, y_coord, crs, cog_file)
+                self._write_cog(da_multiband, x_coord, y_coord, crs, cog_file, reproject=reproject)
 
             # Create thumbnail plot for only the first variable for the first leadtime
             if i == 0:
@@ -961,6 +964,7 @@ class STACGenerator(BaseSTAC):
         y_coord: str,
         crs: str,
         cog_file: Path,
+        reproject: bool=False,
     ):
         """
         Write a multiband DataArray as a Cloud Optimized GeoTIFF (COG).
@@ -971,11 +975,15 @@ class STACGenerator(BaseSTAC):
             y_coord: Y dimension coordinate name.
             crs: Coordinate Reference System (EPSG code).
             cog_file: Path to the output COG file.
+            reproject: Whether to reproject to EPSG:4326.
+                Defaults to False.
         """
         # Add metadata to extracted variable so `to_raster` includes them in the output
         # GeoTIFF
         da_multiband.rio.write_crs(crs, inplace=True)
         da_multiband.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
+        if reproject:
+            da_multiband = da_multiband.rio.reproject("EPSG:4326", inplace=False)
         # da_multiband.rio.to_raster(cog_path, driver="COG", compress=self._compress_method)
         write_cog(cog_file, da_multiband, compress=self._compress_method)
 

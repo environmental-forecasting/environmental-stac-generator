@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 from datetime import datetime as dt
 
+import numpy as np
 import xarray as xr
 from dateutil.tz import tzutc
 from rasterio.crs import CRS
@@ -205,3 +206,50 @@ def format_time(datetime: dt, utc: bool=True, with_seconds: bool=True) -> str:
     fmt = "%Y-%m-%dT%H-%M" + ("-%S" if with_seconds else "")
     result = datetime.strftime(fmt)
     return result + "Z" if utc else result
+
+
+def get_da_statistics(da: xr.DataArray) -> dict:
+    """
+    Compute statistics for a given xr.DataArray.
+
+    Calculates basic statistical values such as minimum, maximum,
+    mean, standard deviation, and the percentage of valid pixels (i.e., non-NaN)
+    in the input DataArray. If the DataArray is empty (size 0), corresponding
+    statistics are set to `None`.
+
+    Args:
+        da: DataArray containing data for which statistics should be computed.
+
+    Returns:
+        A dictionary with the following keys and values:
+
+        - "STATISTICS_MINIMUM": Minimum value of the array, as a float or None if empty.
+        - "STATISTICS_MAXIMUM": Maximum value of the array, as a float or None if empty.
+        - "STATISTICS_MEAN": Mean (average) value of the array, as a float or None if empty.
+        - "STATISTICS_STDDEV": Standard deviation of the array, as a float or None if empty.
+        - "STATISTICS_VALID_PERCENT": Percentage of valid pixels in the array,
+          formatted as a string with two decimal places.
+
+    Notes:
+        - Valid pixels are defined as those that are finite (i.e., not NaN or infinity).
+        - When the DataArray is empty, all statistics except `STATISTICS_VALID_PERCENT`
+          will be set to `None`.
+    """
+    # Compute variable statistics
+    valid_mask = np.isfinite(da.values)
+    valid_pixels = valid_mask.sum()
+    total_pixels = da.size
+    band_min = float(da.min(skipna=True).item()) if da.size > 0 else None
+    band_max = float(da.max(skipna=True).item()) if da.size > 0 else None
+    band_mean = float(da.mean(skipna=True).item()) if da.size > 0 else None
+    band_stddev = float(da.std(skipna=True).item()) if da.size > 0 else None
+    band_valid_percent = float(100.0 * valid_pixels / total_pixels)
+
+    return {
+        "STATISTICS_MINIMUM": band_min,
+        "STATISTICS_MAXIMUM": band_max,
+        "STATISTICS_MEAN": band_mean,
+        "STATISTICS_STDDEV": band_stddev,
+        # What percent of the pixels in a band are valid (i.e., non-NaN / non-nodata)
+        "STATISTICS_VALID_PERCENT": f"{band_valid_percent:.2f}",
+    }

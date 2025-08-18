@@ -28,6 +28,8 @@ from ..utils import (
     proj_to_geo,
     ensure_utc,
     format_time,
+    get_da_statistics,
+
 )
 from .utils import add_file_info_to_asset
 
@@ -866,16 +868,14 @@ class STACGenerator(BaseSTAC):
             da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
 
             da_list.append(da_variable)
+            metadata = {"name": var_name}
 
-            # Compute variable min/max
-            band_min = float(da_variable.min().item()) if da_variable.size > 0 else None
-            band_max = float(da_variable.max().item()) if da_variable.size > 0 else None
-
-            band_metadata.append({
-                "name": var_name,
-                "min": band_min,
-                "max": band_max,
-            })
+            # Only include statistics if not reprojecting, else stats will be different
+            # would need to add after reprojecting.
+            if not reproject:
+                stats = get_da_statistics(da_variable)
+                metadata |= stats
+            band_metadata.append(metadata)
 
         if not stac_only:
             # Stack variables as a single dataset

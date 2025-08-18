@@ -1,4 +1,5 @@
 import logging
+import math
 import re
 from pathlib import Path
 from datetime import datetime as dt
@@ -244,6 +245,8 @@ def get_da_statistics(da: xr.DataArray) -> dict:
     band_mean = float(da.mean(skipna=True).item()) if da.size > 0 else None
     band_stddev = float(da.std(skipna=True).item()) if da.size > 0 else None
     band_valid_percent = float(100.0 * valid_pixels / total_pixels)
+    # Round to 2dp
+    band_valid_percent = math.floor(band_valid_percent * 100) / 100
 
     return {
         "STATISTICS_MINIMUM": band_min,
@@ -251,5 +254,5 @@ def get_da_statistics(da: xr.DataArray) -> dict:
         "STATISTICS_MEAN": band_mean,
         "STATISTICS_STDDEV": band_stddev,
         # What percent of the pixels in a band are valid (i.e., non-NaN / non-nodata)
-        "STATISTICS_VALID_PERCENT": f"{band_valid_percent:.2f}",
+        "STATISTICS_VALID_PERCENT": band_valid_percent,
     }

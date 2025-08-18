@@ -1,8 +1,11 @@
+import logging
+import shutil
 import subprocess
 from pathlib import Path
 
 import xarray as xr
-import shutil
+
+logger = logging.getLogger(__name__)
 
 
 def write_cog(cog_path: Path, da: xr.DataArray, compress: str = "DEFLATE") -> None:

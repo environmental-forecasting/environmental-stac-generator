@@ -30,6 +30,7 @@ dependencies = [
     "python-dotenv",
     "ipython==8.18.0",
     "rich[jupyter]",
+    "rio-cogeo",
     "rioxarray",
     "shapely",
     "tqdm",

@@ -1,58 +1,38 @@
 import logging
-import shutil
-import subprocess
 from pathlib import Path
 
 import xarray as xr
+from rio_cogeo.cogeo import cog_translate
+from rio_cogeo.profiles import cog_profiles
+from rasterio.io import MemoryFile
 
 logger = logging.getLogger(__name__)
 
 
 def write_cog(cog_path: Path, da: xr.DataArray, compress: str = "DEFLATE") -> None:
-    # Note: This creates both internal and external (".ovr") files.
-    # The external because STAC Browser currently seems to look for them.
-    # Found this when checking for console errors. But, not really needed.
-    tmp_cog_path = cog_path.with_name(cog_path.stem + ".tmp.tif")
-    tmp_ovr_path = cog_path.with_name(cog_path.stem + ".tmp.tif.ovr")
-    ovr_path = cog_path.with_name(cog_path.stem + ".tif.ovr")
+    blocksize = 256
+    overview_level = 4
+    # Write the DataArray to an in-memory GeoTIFF using rioxarray
+    with MemoryFile() as memfile:
+        da.rio.to_raster(memfile.name, driver="GTiff", compress=compress)
 
-    # Convert xr.DataArray to GeoTIFF using rioxarray
-    da.rio.to_raster(
-        tmp_cog_path,
-        driver="GTIFF",
-        compress=compress,
-    )
+        with memfile.open("r+") as src_dst:
+            profile = cog_profiles.get("deflate")
+            profile.update(
+                {
+                    "compress": compress,
+                    "blockxsize": blocksize,
+                    "blockysize": blocksize,
+                }
+            )
 
-    # Add external overviews using "gdaladdo"
-    subprocess.run([
-        "gdaladdo",
-        "-q",
-        "-ro",
-        tmp_cog_path,
-        "2", "4", "8", "16",
-    ], check=True)
-    shutil.move(tmp_ovr_path, ovr_path)
-
-    # Add internal overviews using "gdaladdo"
-    subprocess.run([
-        "gdaladdo",
-        "-q",
-        "-r", "average",
-        tmp_cog_path,
-        "2", "4", "8", "16",
-    ], check=True)
-
-    # Convert to Cloud Optimized GeoTIFF using "gdal_translate"
-    subprocess.run([
-        "gdal_translate",
-        tmp_cog_path,
-        cog_path,
-        "-q",
-        "-of", "COG",
-        "-co", f"COMPRESS={compress}",
-        "-co", "BLOCKSIZE=256",
-        "-co", "RESAMPLING=AVERAGE"
-    ], check=True)
-
-    if tmp_cog_path.exists():
-        tmp_cog_path.unlink()
+            # Use rio-cogeo to convert to a proper Cloud Optimized GeoTIFF
+            cog_translate(
+                src_dst,
+                cog_path,
+                profile,
+                overview_level=overview_level,
+                overview_resampling="average",
+                in_memory=True,
+                quiet=True,
+            )

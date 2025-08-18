@@ -657,6 +657,8 @@ class STACGenerator(BaseSTAC):
         )
 
         ds = xr.open_dataset(nc_file, decode_coords="all")
+        # Convert km to m if needed
+        ds = self._convert_units(ds, x_coord, y_coord)
         for time_idx, time_val in enumerate(time_coords):
             ds_time_slice = ds.sel(time=time_val)
 

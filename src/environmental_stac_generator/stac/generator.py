@@ -760,6 +760,18 @@ class STACGenerator(BaseSTAC):
                 overwrite,
             )
 
+            # for i in range(nleadtime):
+            #     i, cog_file, assets, pbar_description = self._process_leadtime(i, *process_args)
+            #     for asset in assets:
+            #         item.add_asset(key=asset["key"], asset=asset["asset"])
+            #         add_file_info_to_asset(asset["asset"], asset["asset"].href)
+            #         # Use the first thumbnail generated for this item as the
+            #         # thumbnail for the collection as well.
+            #         if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
+            #             # Skip if the collection already has a thumbnail asset
+            #             if not collection.get_assets(role="thumbnail"):
+            #                 collection.add_asset(key=asset["key"], asset=asset["asset"])
+
             # Process each leadtime
             with ProcessPoolExecutor(max_workers=workers) as executor:
                 with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:

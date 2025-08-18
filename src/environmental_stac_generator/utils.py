@@ -268,3 +268,14 @@ def is_jsonable(x):
         return True
     except (TypeError, OverflowError):
         return False
+
+
+def get_nc_attributes(nc_attrs):
+    # Add all attributes found to metadata if it can be
+    # serialised.
+    metadata = {}
+    if nc_attrs:
+        for key, attr in nc_attrs.items():
+            if is_jsonable(attr):
+                metadata[key] = attr
+    return metadata

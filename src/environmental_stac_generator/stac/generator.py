@@ -29,7 +29,7 @@ from ..utils import (
     ensure_utc,
     format_time,
     get_da_statistics,
-    is_jsonable,
+    get_nc_attributes,
 )
 from .utils import add_file_info_to_asset
 
@@ -706,11 +706,15 @@ class STACGenerator(BaseSTAC):
                 #     ds_time_slice = ds.sel(time=time_val)
                     self._write_netcdf(ds_time_slice, out_nc_file)
 
+
             properties={
                 "forecast:reference_time": forecast_reference_time_str,
                 "forecast:end_time": forecast_end_time_str,
                 "forecast:leadtime_length": nleadtime,
             }
+
+            nc_metadata = get_nc_attributes(ds_time_slice.attrs)
+            properties |=  nc_metadata
 
             # Add STAC Item for this netCDF file
             item = self.get_or_create_item(
@@ -718,7 +722,8 @@ class STACGenerator(BaseSTAC):
                 item_id=item_id,
                 geometry=geometry,
                 bbox=bbox,
-                datetime=forecast_reference_time,
+                datetime=forecast_reference_time, # Becomes "Time of Data" property, under Metadata -> General in STAC-Browser
+                                                  # Used for temporal filtering of items
                 start_datetime=forecast_reference_time,
                 end_datetime=forecast_end_time,
                 crs=crs,
@@ -883,11 +888,8 @@ class STACGenerator(BaseSTAC):
             metadata = {"name": var_name}
             nc_attrs = da_variable.attrs
 
-            # Add all attributes found to metadata if it can be
-            # serialised.
-            for key, attr in nc_attrs.items():
-                if is_jsonable(attr):
-                    metadata[key] = attr
+            nc_metadata = get_nc_attributes(nc_attrs)
+            metadata |= nc_metadata
 
             # Only include statistics if not reprojecting, else stats will be different
             # would need to add after reprojecting.

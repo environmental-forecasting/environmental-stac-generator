@@ -879,13 +879,13 @@ class STACGenerator(BaseSTAC):
         da_list = []
         band_names = valid_bands
         band_metadata = []
-        for i, var_name in enumerate(band_names, start=1):
+        for bidx, var_name in enumerate(band_names, start=1):
             da_variable = ds_leadtime_slice[var_name]
             da_variable.rio.write_crs(crs, inplace=True)
             da_variable.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
 
             da_list.append(da_variable)
-            metadata = {"name": var_name, "index": i}
+            metadata = {"name": var_name, "index": bidx}
             nc_attrs = da_variable.attrs
 
             nc_metadata = get_nc_attributes(nc_attrs)

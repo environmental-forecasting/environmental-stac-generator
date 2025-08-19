@@ -7,11 +7,11 @@ A command-line tool for generating **Cloud Optimized GeoTIFFs (COGs)** and **STA
 ## Features
 
 - Converts netCDF predictions into Cloud Optimized GeoTIFFs (COGs)
-- Automatically reprojects to EPSG:4326 for Leaflet/web-map compatibility
 - Builds STAC-compliant metadata catalogs for each forecast
 - Supports compressed or uncompressed output
 - Dynamically detects northern or southern hemisphere from input data
 - Outputs COGs, sliced netCDFs, and thumbnails in standardised format
+- Ingests netCDF attributes as STAC Item metadata
 - Generates config files to ensure consistent processing
 
 ## Installation
@@ -37,6 +37,7 @@ It expects an `.env` file where you're running the command from, with `FILE_SERV
 e.g.
 
 ```bash
+#.env
 FILE_SERVER_URL=http://localhost:8002
 ```
 

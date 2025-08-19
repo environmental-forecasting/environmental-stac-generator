@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "environmental_stac_generator"
 version = "0.0.1"
+requires-python = ">=3.12"
 description = "Preprocess machine learning weather forecast netCDF prediction outputs to GeoTIFF for use with environmental-stac-dashboard"
 readme = "README.md"
 authors = [

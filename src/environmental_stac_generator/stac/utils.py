@@ -10,6 +10,10 @@ from multiformats import multihash
 from pystac.extensions.file import FileExtension
 
 
+class ConfigMismatchError(Exception):
+    pass
+
+
 def file_multihash(file_path: str) -> str:
     """Computes a multihash-encoded MD5 digest of the entire file.
 

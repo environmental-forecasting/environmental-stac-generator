@@ -31,7 +31,7 @@ from ..utils import (
     get_da_statistics,
     get_nc_attributes,
 )
-from .utils import add_file_info_to_asset
+from .utils import add_file_info_to_asset, ConfigMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -452,7 +452,7 @@ class STACGenerator(BaseSTAC):
                             "previous! Run with old values (below) to continue!"
                         )
                         logger.error(current_config_data[collection_name])
-                        exit(1)
+                        raise ConfigMismatchError("Config does not match previous run.")
         else:
             config_output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_output_path, "wb") as f:

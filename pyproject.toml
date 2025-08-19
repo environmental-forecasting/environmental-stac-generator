@@ -59,5 +59,7 @@ package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]
 addopts = [
-    "--import-mode=importlib",
+  "-ra",
+  # "-q",
+  "--import-mode=importlib",
 ]

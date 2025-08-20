@@ -57,7 +57,6 @@ The optional flags that can be used are:
 | `--no-compress`, `-c` | Disable compression in generated GeoTIFFs (default is compressed).     |
 | `--name`, `-n`        | Specify a collection name (default: "default")                         |
 | `--workers`, `-w`     | Set max number of concurrent workers (default: 4)                      |
-| `--not-flat`, `-nf`   | Output hierarchical STAC JSON (default is flat for pgSTAC compatibility) |
 | `--stac-only`, `-s`   | Output only the STAC files, not COGs/Thumbnails (default not enabled)  |
 
 The ingestion requires the [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator) docker compose environment to be running (since it will ingest into a PostgreSQL database). Please follow the [README](https://github.com/environmental-forecasting/environmental-stac-orchestrator/blob/main/README.md) from it.

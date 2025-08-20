@@ -3,9 +3,10 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "icenet_dashboard_preprocessor"
+name = "environmental_stac_generator"
 version = "0.0.1"
-description = "Preprocess IceNet netCDF predictions to GeoTIFF for icenet-dashboard"
+requires-python = ">=3.12"
+description = "Preprocess machine learning weather forecast netCDF prediction outputs to GeoTIFF for use with environmental-stac-dashboard"
 readme = "README.md"
 authors = [
   {name = "Bryn Noel Ubald", email = "bryald@bas.ac.uk"}
@@ -17,13 +18,24 @@ classifiers = [
 ]
 license = {text = "MIT license"}
 dependencies = [
+    "deepdiff",
+    "python-dateutil",
+    "matplotlib",
+    "multiformats",
     "numpy",
+    "orjson",
     "prompt_toolkit==3.0.36",
+    "psycopg[pool,binary]",
+    "pypgstac",
     "pystac",
+    "python-dotenv",
     "ipython==8.18.0",
     "rich[jupyter]",
+    "rio-cogeo",
     "rioxarray",
+    "shapely",
     "tqdm",
+    "typer",
     "xarray[io]",
 ]
 
@@ -32,14 +44,23 @@ dev = [
     "coverage",
     "mypy",
     "pytest",
+    "pytest-mock",
     "ruff"
 ]
 
 [project.scripts]
-icenet_dashboard_preprocess = "icenet_dashboard_preprocessor.preprocess:main"
+envstacgen = "environmental_stac_generator.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "*" = ["*.*"]
+
+[tool.pytest.ini_options]
+addopts = [
+  "-ra",
+  # "-q",
+  "--import-mode=importlib",
+]
+testpaths = ["tests"]

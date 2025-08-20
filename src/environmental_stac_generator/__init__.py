@@ -1,4 +1,4 @@
-"""Top-level package for icenet_dashboard_preprocessor."""
+"""Top-level package for environmental_stac_generator."""
 
 __author__ = """Bryn Noel Ubald"""
 __email__ = 'bryald@bas.ac.uk'

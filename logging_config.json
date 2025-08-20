@@ -34,7 +34,12 @@
           "level": "WARNING",
           "handlers": ["rich_handler"]
         },
-        "icenet_dashboard_preprocessor.preprocess": {
+        "environmental_stac_generator.preprocess": {
+          "level": "DEBUG",
+          "propagate": false,
+          "handlers": ["rich_handler"]
+        },
+        "environmental_stac_generator": {
           "level": "DEBUG",
           "propagate": false,
           "handlers": ["rich_handler"]

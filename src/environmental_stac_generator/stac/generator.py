@@ -13,7 +13,7 @@ import pystac
 import xarray as xr
 from dateutil.relativedelta import relativedelta
 from deepdiff import DeepDiff
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
 from pystac.utils import datetime_to_str, str_to_datetime
@@ -85,7 +85,7 @@ class BaseSTAC:
         """
         # The base URL for the STAC catalogs.
         # If set, the root of the STAC href links will use this url as the base path
-        load_dotenv()
+        load_dotenv(find_dotenv(usecwd=True))
         self._FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", None)
         logger.info(f"FILE_SERVER_URL: {self._FILE_SERVER_URL}")
 

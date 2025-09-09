@@ -9,7 +9,8 @@ import logging
 from logging.config import dictConfig
 from pathlib import Path
 
-package_root = Path(__spec__.origin).resolve().parent.parent.parent
+# Get package root by getting the directory this script is in
+package_root = Path(__spec__.origin).resolve().parent
 logging_config = package_root / "logging_config.json"
 
 try:

@@ -1,7 +1,7 @@
 import logging
 import os
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 from .stac.dataloader import PGSTACDataLoader
 
@@ -34,7 +34,7 @@ def main(catalog: str, overwrite: bool = False) -> None:
     """
 
     # Configuration
-    load_dotenv()
+    load_dotenv(find_dotenv(usecwd=True))
 
     db_info = {
         "HOST_IP": os.getenv("HOST_IP", None),

@@ -10,10 +10,11 @@ import matplotlib.pyplot as plt
 import orjson
 import pandas as pd
 import pystac
+import rasterio
 import xarray as xr
 from dateutil.relativedelta import relativedelta
 from deepdiff import DeepDiff
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
 from pystac.utils import datetime_to_str, str_to_datetime
@@ -22,16 +23,16 @@ from tqdm import tqdm
 
 from ..cog import write_cog
 from ..utils import (
-    find_coord,
-    get_hemisphere,
-    parse_forecast_frequency,
-    proj_to_geo,
     ensure_utc,
+    find_coord,
     format_time,
     get_da_statistics,
+    get_hemisphere,
     get_nc_attributes,
+    parse_forecast_frequency,
+    proj_to_geo,
 )
-from .utils import add_file_info_to_asset, ConfigMismatchError
+from .utils import ConfigMismatchError, add_file_info_to_asset
 
 logger = logging.getLogger(__name__)
 
@@ -922,6 +923,12 @@ class STACGenerator(BaseSTAC):
         else:
             pbar_description = f"Processing STAC: {item_id_cog}"
 
+        with rasterio.open(cog_file) as src:
+            width = src.width
+            height = src.height
+            transform = list(src.transform)[:6]
+            epsg_code = src.crs.to_epsg()
+
         assets = []
         # Add COG asset to item
         cog_asset = dict(
@@ -936,10 +943,14 @@ class STACGenerator(BaseSTAC):
                     "forecast:bands": band_metadata,
                     "custom:leadtime": i,
                     "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    "proj:transform": transform,  # Affine transformation
+                    "proj:shape": [height, width],  # Note: shape = [rows, cols]
+                    "proj:epsg": epsg_code,  # Optional but good to include
                 },
             ),
         )
         assets.append(cog_asset)
+        item.stac_extensions.append("projection")
 
         # Create a thumbnail plot of the first variable for the first leadtime
         if i == 0:

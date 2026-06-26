@@ -36,6 +36,11 @@ from .utils import ConfigMismatchError, add_file_info_to_asset
 
 logger = logging.getLogger(__name__)
 
+# Datetime format constants used for STAC asset generation
+DT_FMT_FILENAME = "%Y-%m-%d_%H%M"       # Filesystem-safe format for COG filenames and item IDs
+DT_FMT_DISPLAY = "%Y-%m-%d %H:%M"       # Human-readable format for asset titles
+DT_FMT_ISO8601 = "%Y-%m-%dT%H:%M:%SZ"   # ISO 8601 format for STAC properties
+
 
 class BaseSTAC:
     def __init__(
@@ -864,12 +869,9 @@ class STACGenerator(BaseSTAC):
         )
 
         valid_time_str = datetime_to_str(valid_time)
-        valid_time_str_1 = valid_time.strftime("%Y-%m-%d_%H%M")
-        valid_time_str_2 = valid_time.strftime("%Y-%m-%d %H:%M")
-        valid_time_str_3 = valid_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Add STAC Item for this file
-        item_id_cog = f"{item.id}_lead_{valid_time_str_1}"
+        item_id_cog = f"{item.id}_lead_{valid_time.strftime(DT_FMT_FILENAME)}"
 
         # Define cog/thumbnail output paths
         cog_file = cog_dir / f"{item_id_cog}.tif"
@@ -936,13 +938,13 @@ class STACGenerator(BaseSTAC):
             asset=Asset(
                 href=str(cog_file),
                 media_type=pystac.MediaType.COG,
-                title=f"Forecast at {valid_time_str_2}",
+                title=f"Forecast at {valid_time.strftime(DT_FMT_DISPLAY)}",
                 description=f"Variables: {', '.join(band_names)}",
                 roles=["data"],
                 extra_fields={
                     "forecast:bands": band_metadata,
                     "custom:leadtime": i,
-                    "custom:valid_time": valid_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    "custom:valid_time": valid_time.strftime(DT_FMT_ISO8601),
                     "proj:transform": transform,  # Affine transformation
                     "proj:shape": [height, width],  # Note: shape = [rows, cols]
                     "proj:epsg": epsg_code,  # Optional but good to include

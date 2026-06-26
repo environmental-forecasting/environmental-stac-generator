@@ -1062,8 +1062,14 @@ class STACGenerator(BaseSTAC):
 
             for item in catalog.get_all_items():
                 for asset_key, asset in item.assets.items():
-                    # Replace relative file path with URL
-                    if asset.href.startswith("./"):
-                        asset.href = FILE_SERVER_URL + asset.href.lstrip("./")
+                    abs_href = asset.get_absolute_href()
+                    if abs_href and not abs_href.startswith(("http://", "https://")):
+                        try:
+                            # Resolve the absolute path relative to the current working directory
+                            rel_path = Path(abs_href).relative_to(Path.cwd())
+                            asset.href = FILE_SERVER_URL + str(rel_path)
+                        except ValueError:
+                            # If not relative to CWD, leave it as is
+                            pass
 
         catalog.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)

@@ -115,16 +115,11 @@ class PGSTACDataLoader:
         """
         catalog_file = Path(catalog_file)
         if not catalog_file.exists():
-            logger.error(f"Catalog file not found: {catalog_file}")
-            return False
+            raise FileNotFoundError(f"Catalog file not found: {catalog_file}")
 
-        try:
-            self.catalog = Catalog.from_file(str(catalog_file))
-            self._load_collections_from_file(overwrite=overwrite)
-            return True
-        except Exception as e:
-            logger.exception(f"Failed to read catalog: {e}")
-            return False
+        self.catalog = Catalog.from_file(str(catalog_file))
+        self._load_collections_from_file(overwrite=overwrite)
+        return True
 
     def _load_collections_from_file(self, overwrite: bool = False) -> None:
         """Process collections and items from the STAC catalog file.
@@ -169,29 +164,26 @@ class PGSTACDataLoader:
             True if ingestion was successful, False otherwise.
         """
         insert_mode = Methods.upsert if overwrite else Methods.insert
-        try:
-            # Load collections via your existing loader
-            if collections_to_load:
-                self.loader.load_collections(
-                    file=iter(collections_to_load), insert_mode=insert_mode
-                )
-                logger.info(f"Loaded {len(collections_to_load)} collections")
-            else:
-                logger.info("No collections to load")
+        
+        # Load collections via your existing loader
+        if collections_to_load:
+            self.loader.load_collections(
+                file=iter(collections_to_load), insert_mode=insert_mode
+            )
+            logger.info(f"Loaded {len(collections_to_load)} collections")
+        else:
+            logger.info("No collections to load")
 
-            # Load items via your existing loader
-            if items_to_load:
-                self.loader.load_items(
-                    file=iter(items_to_load), insert_mode=insert_mode
-                )
-                logger.info(f"Loaded {len(items_to_load)} items")
-            else:
-                logger.info("No items to load")
+        # Load items via your existing loader
+        if items_to_load:
+            self.loader.load_items(
+                file=iter(items_to_load), insert_mode=insert_mode
+            )
+            logger.info(f"Loaded {len(items_to_load)} items")
+        else:
+            logger.info("No items to load")
 
-            return True
-        except Exception as e:
-            logger.exception(f"Failed to load STAC catalog: {e}")
-            return False
+        return True
 
     def wait_for_api(self, max_retries: int = 30, delay: int = 10) -> bool:
         """Wait for the STAC API to become accessible.

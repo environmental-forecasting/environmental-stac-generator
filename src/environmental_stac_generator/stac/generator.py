@@ -337,9 +337,15 @@ class BaseSTAC:
         return self._stac_catalog
 
     def get_collection(self, collection_id):
-        """Get the current STAC catalog.
+        """Get a child collection by its ID.
 
-        Provides access to the internal STAC catalog used for data processing.
+        Searches the catalog's children for a collection matching the given ID.
+
+        Args:
+            collection_id: The ID of the collection to retrieve.
+
+        Returns:
+            The matching Collection, or None if not found.
         """
         collection = next(
             (
@@ -386,14 +392,6 @@ class BaseSTAC:
             **kwargs: Additional keyword arguments for custom processing logic.
         """
         pass
-
-    # @abstractmethod
-    # def create_collection(self) -> None:
-    #     pass
-
-    # @abstractmethod
-    # def add_item_to_collection(self) -> None:
-    #     pass
 
 
 class STACGenerator(BaseSTAC):
@@ -665,8 +663,9 @@ class STACGenerator(BaseSTAC):
         )
 
         ds = xr.open_dataset(nc_file, decode_coords="all")
-        # Convert km to m if needed
-        ds = self._convert_units(ds, x_coord, y_coord)
+        try:
+            # Convert km to m if needed
+            ds = self._convert_units(ds, x_coord, y_coord)
         for time_idx, time_val in enumerate(time_coords):
             ds_time_slice = ds.sel(time=time_val)
 
@@ -675,21 +674,13 @@ class STACGenerator(BaseSTAC):
             forecast_reference_time = pd.to_datetime(time_val.values)
             forecast_reference_date = forecast_reference_time.date()
             forecast_reference_time_str = datetime_to_str(forecast_reference_time)
-            forecast_reference_time_str_1 = forecast_reference_time.strftime(
-                "%Y-%m-%d_%H:%M"
-            )
-            forecast_reference_time_str_2 = forecast_reference_time.strftime(
-                "%Y-%m-%d %H:%M"
-            )
-            forecast_reference_time_str_3 = format_time(forecast_reference_time)
+            # Filesystem-safe format for item IDs and netCDF filenames
+            forecast_reference_time_filesafe = format_time(forecast_reference_time)
 
             forecast_end_time = forecast_reference_time + relativedelta(
                 **{leadtime_unit: nleadtime - 1} # type: ignore
             )
             forecast_end_time_str = datetime_to_str(forecast_end_time)
-            # forecast_end_time_str_1 = forecast_end_time.strftime("%Y-%m-%d_%H:%M")
-            # forecast_end_time_str_2 = forecast_end_time.strftime("%Y-%m-%d %H:%M")
-            # forecast_end_time_str_3 = forecast_end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
             # Create output dirs
             ncdf_dir = Path(
@@ -698,19 +689,17 @@ class STACGenerator(BaseSTAC):
             cog_dir = Path(
                 self._cogs_output_dir / f"{forecast_reference_date}"
             )
-            item_id = f"forecast_init_{forecast_reference_time_str_3}"
+            item_id = f"forecast_init_{forecast_reference_time_filesafe}"
 
             ncdf_dir.mkdir(parents=True, exist_ok=True)
             cog_dir.mkdir(parents=True, exist_ok=True)
 
             # Save the forecast init slice as a netcdf file
-            out_nc_file = ncdf_dir / f"{forecast_reference_time_str_3}.nc"
+            out_nc_file = ncdf_dir / f"{forecast_reference_time_filesafe}.nc"
 
             # Write the netCDF file in addition to the STAC json output
             if not stac_only:
-                # with xr.open_dataset(nc_file, decode_coords="all") as ds:
-                #     ds_time_slice = ds.sel(time=time_val)
-                    self._write_netcdf(ds_time_slice, out_nc_file)
+                self._write_netcdf(ds_time_slice, out_nc_file)
 
 
             properties={
@@ -742,7 +731,7 @@ class STACGenerator(BaseSTAC):
             nc_asset = Asset(
                     href=str(out_nc_file),
                     media_type=pystac.MediaType.NETCDF,
-                    title=f"Full forecast netCDF from {forecast_reference_time_str_2}",
+                    title=f"Full forecast netCDF from {forecast_reference_time.strftime(DT_FMT_DISPLAY)}",
                     description="netCDF file container forecast variables for forecast"
                                 f" initialised at: {forecast_reference_time_str}",
                     roles=["data"],
@@ -771,18 +760,6 @@ class STACGenerator(BaseSTAC):
                 overwrite,
             )
 
-            # for i in range(nleadtime):
-            #     i, cog_file, assets, pbar_description = self._process_leadtime(i, *process_args)
-            #     for asset in assets:
-            #         item.add_asset(key=asset["key"], asset=asset["asset"])
-            #         add_file_info_to_asset(asset["asset"], asset["asset"].href)
-            #         # Use the first thumbnail generated for this item as the
-            #         # thumbnail for the collection as well.
-            #         if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
-            #             # Skip if the collection already has a thumbnail asset
-            #             if not collection.get_assets(role="thumbnail"):
-            #                 collection.add_asset(key=asset["key"], asset=asset["asset"])
-
             # Process each leadtime
             with ProcessPoolExecutor(max_workers=workers) as executor:
                 with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
@@ -808,7 +785,8 @@ class STACGenerator(BaseSTAC):
                                 if not collection.get_assets(role="thumbnail"):
                                     collection.add_asset(key=asset["key"], asset=asset["asset"])
 
-        ds.close()
+        finally:
+            ds.close()
 
         # Save catalog and collections
         self.save_catalog()

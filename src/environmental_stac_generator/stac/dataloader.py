@@ -121,10 +121,10 @@ class PGSTACDataLoader:
         try:
             self.catalog = Catalog.from_file(str(catalog_file))
             self._load_collections_from_file(overwrite=overwrite)
+            return True
         except Exception as e:
             logger.exception(f"Failed to read catalog: {e}")
-
-        return False
+            return False
 
     def _load_collections_from_file(self, overwrite: bool = False) -> None:
         """Process collections and items from the STAC catalog file.

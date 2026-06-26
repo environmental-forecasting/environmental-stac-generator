@@ -46,8 +46,7 @@ def main(catalog: str, overwrite: bool = False) -> None:
 
     for key, value in db_info.items():
         if value is None:
-            logger.error(f"Missing {key} in .env file")
-            exit(1)
+            raise ValueError(f"Missing required environment variable: {key}")
 
     pg_db_url = (
         f"postgresql://{db_info['DATABASE_USER']}:{db_info['DATABASE_PASSWORD']}"

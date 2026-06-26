@@ -58,13 +58,12 @@ def main(
         nc_files = [Path(f) for f in input]
 
     if not nc_files:
-        logger.error("No files provided... Please specify which files to convert.")
-        exit(1)
+        raise FileNotFoundError("No files provided. Please specify which files to convert.")
 
-    for nc_file in nc_files:
-        if not nc_file.exists():
-            nc_files.remove(nc_file)
-            logger.warning(f"File {nc_file} does not exist")
+    missing = [f for f in nc_files if not f.exists()]
+    for f in missing:
+        logger.warning(f"File {f} does not exist")
+    nc_files = [f for f in nc_files if f.exists()]
 
     if nc_files:
         logger.info(f"Found {len(nc_files)} netCDF files")

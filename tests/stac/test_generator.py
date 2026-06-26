@@ -233,7 +233,7 @@ def test_get_bbox_and_geometry_with_projection(stac, mocker):
 
     # Mock proj_to_geo
     mocker.patch(
-        "environmental_stac_generator.utils.proj_to_geo", return_value=expected_bbox
+        "environmental_stac_generator.stac.generator.proj_to_geo", return_value=expected_bbox
     )
 
     returned_bbox, geometry = stac._get_bbox_and_geometry(ds, x_coord, y_coord, crs)

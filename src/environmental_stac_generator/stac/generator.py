@@ -666,125 +666,124 @@ class STACGenerator(BaseSTAC):
         try:
             # Convert km to m if needed
             ds = self._convert_units(ds, x_coord, y_coord)
-        for time_idx, time_val in enumerate(time_coords):
-            ds_time_slice = ds.sel(time=time_val)
+            for time_idx, time_val in enumerate(time_coords):
+                ds_time_slice = ds.sel(time=time_val)
 
-            # The forecast initialisation time (CF Convention: `forecast_reference_time`)
-            # is the first forecast being predicted
-            forecast_reference_time = pd.to_datetime(time_val.values)
-            forecast_reference_date = forecast_reference_time.date()
-            forecast_reference_time_str = datetime_to_str(forecast_reference_time)
-            # Filesystem-safe format for item IDs and netCDF filenames
-            forecast_reference_time_filesafe = format_time(forecast_reference_time)
+                # The forecast initialisation time (CF Convention: `forecast_reference_time`)
+                # is the first forecast being predicted
+                forecast_reference_time = pd.to_datetime(time_val.values)
+                forecast_reference_date = forecast_reference_time.date()
+                forecast_reference_time_str = datetime_to_str(forecast_reference_time)
+                # Filesystem-safe format for item IDs and netCDF filenames
+                forecast_reference_time_filesafe = format_time(forecast_reference_time)
 
-            forecast_end_time = forecast_reference_time + relativedelta(
-                **{leadtime_unit: nleadtime - 1} # type: ignore
-            )
-            forecast_end_time_str = datetime_to_str(forecast_end_time)
+                forecast_end_time = forecast_reference_time + relativedelta(
+                    **{leadtime_unit: nleadtime - 1} # type: ignore
+                )
+                forecast_end_time_str = datetime_to_str(forecast_end_time)
 
-            # Create output dirs
-            ncdf_dir = Path(
-                self._netcdf_output_dir / f"{forecast_reference_date}"
-            )
-            cog_dir = Path(
-                self._cogs_output_dir / f"{forecast_reference_date}"
-            )
-            item_id = f"forecast_init_{forecast_reference_time_filesafe}"
+                # Create output dirs
+                ncdf_dir = Path(
+                    self._netcdf_output_dir / f"{forecast_reference_date}"
+                )
+                cog_dir = Path(
+                    self._cogs_output_dir / f"{forecast_reference_date}"
+                )
+                item_id = f"forecast_init_{forecast_reference_time_filesafe}"
 
-            ncdf_dir.mkdir(parents=True, exist_ok=True)
-            cog_dir.mkdir(parents=True, exist_ok=True)
+                ncdf_dir.mkdir(parents=True, exist_ok=True)
+                cog_dir.mkdir(parents=True, exist_ok=True)
 
-            # Save the forecast init slice as a netcdf file
-            out_nc_file = ncdf_dir / f"{forecast_reference_time_filesafe}.nc"
+                # Save the forecast init slice as a netcdf file
+                out_nc_file = ncdf_dir / f"{forecast_reference_time_filesafe}.nc"
 
-            # Write the netCDF file in addition to the STAC json output
-            if not stac_only:
-                self._write_netcdf(ds_time_slice, out_nc_file)
+                # Write the netCDF file in addition to the STAC json output
+                if not stac_only:
+                    self._write_netcdf(ds_time_slice, out_nc_file)
 
 
-            properties={
-                "forecast:reference_time": forecast_reference_time_str,
-                "forecast:end_time": forecast_end_time_str,
-                "forecast:leadtime_length": nleadtime,
-            }
+                properties={
+                    "forecast:reference_time": forecast_reference_time_str,
+                    "forecast:end_time": forecast_end_time_str,
+                    "forecast:leadtime_length": nleadtime,
+                }
 
-            nc_metadata = get_nc_attributes(ds_time_slice.attrs)
-            properties |=  nc_metadata
+                nc_metadata = get_nc_attributes(ds_time_slice.attrs)
+                properties |=  nc_metadata
 
-            # Add STAC Item for this netCDF file
-            item = self.get_or_create_item(
-                collection=collection,
-                item_id=item_id,
-                geometry=geometry,
-                bbox=bbox,
-                datetime=forecast_reference_time, # Becomes "Time of Data" property, under Metadata -> General in STAC-Browser
-                                                  # Used for temporal filtering of items
-                start_datetime=forecast_reference_time,
-                end_datetime=forecast_end_time,
-                crs=crs,
-                properties=properties,
-            )
-            # Add file extension
-            item.ext.add("file")
+                # Add STAC Item for this netCDF file
+                item = self.get_or_create_item(
+                    collection=collection,
+                    item_id=item_id,
+                    geometry=geometry,
+                    bbox=bbox,
+                    datetime=forecast_reference_time, # Becomes "Time of Data" property, under Metadata -> General in STAC-Browser
+                                                      # Used for temporal filtering of items
+                    start_datetime=forecast_reference_time,
+                    end_datetime=forecast_end_time,
+                    crs=crs,
+                    properties=properties,
+                )
+                # Add file extension
+                item.ext.add("file")
 
-            # Add netCDF asset to item
-            nc_asset = Asset(
-                    href=str(out_nc_file),
-                    media_type=pystac.MediaType.NETCDF,
-                    title=f"Full forecast netCDF from {forecast_reference_time.strftime(DT_FMT_DISPLAY)}",
-                    description="netCDF file container forecast variables for forecast"
-                                f" initialised at: {forecast_reference_time_str}",
-                    roles=["data"],
-                    extra_fields={
-                        "forecast:reference_time": forecast_reference_time_str,
-                        "forecast:end_time": forecast_end_time_str,
-                        "forecast:leadtime_length": nleadtime,
-                    }
+                # Add netCDF asset to item
+                nc_asset = Asset(
+                        href=str(out_nc_file),
+                        media_type=pystac.MediaType.NETCDF,
+                        title=f"Full forecast netCDF from {forecast_reference_time.strftime(DT_FMT_DISPLAY)}",
+                        description="netCDF file container forecast variables for forecast"
+                                    f" initialised at: {forecast_reference_time_str}",
+                        roles=["data"],
+                        extra_fields={
+                            "forecast:reference_time": forecast_reference_time_str,
+                            "forecast:end_time": forecast_end_time_str,
+                            "forecast:leadtime_length": nleadtime,
+                        }
+                    )
+
+                item.add_asset(key="netcdf", asset=nc_asset)
+                nc_asset = add_file_info_to_asset(nc_asset, nc_asset.href)
+
+                process_args = (
+                    forecast_reference_time,
+                    leadtime_unit,
+                    leadtime_step,
+                    ds_time_slice,
+                    x_coord,
+                    y_coord,
+                    crs,
+                    cog_dir,
+                    stac_only,
+                    item,
+                    valid_bands,
+                    overwrite,
                 )
 
-            item.add_asset(key="netcdf", asset=nc_asset)
-            nc_asset = add_file_info_to_asset(nc_asset, nc_asset.href)
+                # Process each leadtime
+                with ProcessPoolExecutor(max_workers=workers) as executor:
+                    with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
+                        futures = []
+                        for i in range(nleadtime):
+                            future = executor.submit(
+                                self._process_leadtime, i, *process_args
+                            )
+                            future.add_done_callback(lambda _: pbar.update(1))
+                            futures.append(future)
 
-            process_args = (
-                forecast_reference_time,
-                leadtime_unit,
-                leadtime_step,
-                ds_time_slice,
-                x_coord,
-                y_coord,
-                crs,
-                cog_dir,
-                stac_only,
-                item,
-                valid_bands,
-                overwrite,
-            )
-
-            # Process each leadtime
-            with ProcessPoolExecutor(max_workers=workers) as executor:
-                with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
-                    futures = []
-                    for i in range(nleadtime):
-                        future = executor.submit(
-                            self._process_leadtime, i, *process_args
-                        )
-                        future.add_done_callback(lambda _: pbar.update(1))
-                        futures.append(future)
-
-                    # Wait for all futures to complete
-                    for future in futures:
-                        i, cog_file, assets, pbar_description = future.result()
-                        pbar.set_description(pbar_description)
-                        for asset in assets:
-                            item.add_asset(key=asset["key"], asset=asset["asset"])
-                            add_file_info_to_asset(asset["asset"], asset["asset"].href)
-                            # Use the first thumbnail generated for this item as the
-                            # thumbnail for the collection as well.
-                            if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
-                                # Skip if the collection already has a thumbnail asset
-                                if not collection.get_assets(role="thumbnail"):
-                                    collection.add_asset(key=asset["key"], asset=asset["asset"])
-
+                        # Wait for all futures to complete
+                        for future in futures:
+                            i, cog_file, assets, pbar_description = future.result()
+                            pbar.set_description(pbar_description)
+                            for asset in assets:
+                                item.add_asset(key=asset["key"], asset=asset["asset"])
+                                add_file_info_to_asset(asset["asset"], asset["asset"].href)
+                                # Use the first thumbnail generated for this item as the
+                                # thumbnail for the collection as well.
+                                if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
+                                    # Skip if the collection already has a thumbnail asset
+                                    if not collection.get_assets(role="thumbnail"):
+                                        collection.add_asset(key=asset["key"], asset=asset["asset"])
         finally:
             ds.close()
 

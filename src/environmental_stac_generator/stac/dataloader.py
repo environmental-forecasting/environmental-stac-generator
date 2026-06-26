@@ -47,8 +47,7 @@ class PGSTACDataLoader:
         if stac_api_url:
             self.stac_api_url = stac_api_url.rstrip("/")
             if not self.wait_for_api():
-                logger.error("STAC API not available, exiting")
-                exit(1)
+                raise ConnectionError("STAC API not available")
         self._use_api = stac_api_url if stac_api_url else None
 
     def collection_exists(self, collection_id: str) -> bool:

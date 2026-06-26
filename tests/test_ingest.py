@@ -14,16 +14,18 @@ def mock_env(monkeypatch):
     monkeypatch.setenv("DATABASE_DBNAME", "db")
 
 
-def test_main_missing_env_vars(monkeypatch):
+def test_main_missing_env_vars(mock_env, monkeypatch):
     # Ensure environment variables are clear
     monkeypatch.delenv("DATABASE_USER", raising=False)
     
-    with pytest.raises(ValueError, match="Missing required environment variable: DATABASE_USER"):
-        main("catalog.json")
+    with patch("environmental_stac_generator.ingest.load_dotenv"):
+        with pytest.raises(ValueError, match="Missing required environment variable: DATABASE_USER"):
+            main("catalog.json")
 
 
 def test_main_success(mock_env):
-    with patch("environmental_stac_generator.ingest.PGSTACDataLoader") as MockLoader:
+    with patch("environmental_stac_generator.ingest.PGSTACDataLoader") as MockLoader, \
+         patch("environmental_stac_generator.ingest.load_dotenv"):
         mock_instance = MockLoader.return_value
         
         main("catalog.json", overwrite=True)

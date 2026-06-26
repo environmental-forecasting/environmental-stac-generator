@@ -35,7 +35,7 @@ def test_init_with_api_url_success(mock_db, mock_loader):
 
 def test_init_with_api_url_failure(mock_db, mock_loader):
     with patch.object(PGSTACDataLoader, "wait_for_api", return_value=False):
-        with pytest.raises(SystemExit):
+        with pytest.raises(ConnectionError, match="STAC API not available"):
             PGSTACDataLoader("postgresql://user:pass@localhost:5432/db", stac_api_url="http://localhost:8000/")
 
 

@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 from ..cog import write_cog
 from ..utils import (
+    DEFAULT_WORKERS,
     ensure_utc,
     find_coord,
     format_time,
@@ -556,7 +557,7 @@ class STACGenerator(BaseSTAC):
         compress: bool = True,
         overwrite: bool = False,
         stac_only: bool = False,
-        workers: int = 1,
+        workers: int = DEFAULT_WORKERS,
     ) -> None:
         """
         Process a netCDF file and generate STAC Items/Collections for forecast data.

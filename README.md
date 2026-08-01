@@ -54,7 +54,7 @@ The optional flags that can be used are:
 | `--overwrite`, `-o`   | Overwrite existing GeoTIFF files if they already exist.                |
 | `--no-compress`, `-c` | Disable compression in generated GeoTIFFs (default is compressed).     |
 | `--name`, `-n`        | Specify a collection name (default: "default")                         |
-| `--workers`, `-w`     | Set max number of concurrent workers (default: 4)                      |
+| `--workers`, `-w`     | Max concurrent workers (default: CPU count)                            |
 | `--stac-only`, `-s`   | Output only the STAC files, not COGs/Thumbnails (default not enabled)  |
 
 The ingestion step requires a reachable PostgreSQL/pgSTAC instance (typically the [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator) stack). See that repository’s README.

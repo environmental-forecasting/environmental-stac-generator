@@ -1,5 +1,5 @@
-import sys
 import logging
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -7,6 +7,7 @@ import typer
 
 from .ingest import main as ingest_main
 from .preprocess import main as preprocess_main
+from .utils import DEFAULT_WORKERS
 
 app = typer.Typer()
 
@@ -45,7 +46,10 @@ def preprocess(
         "default", "-n", "--name", help="Collection name"
     ),
     workers: int = typer.Option(
-        4, "-w", "--workers", help="Max number of concurrent workers"
+        DEFAULT_WORKERS,
+        "-w",
+        "--workers",
+        help=f"Max number of concurrent workers (default: CPU count, {DEFAULT_WORKERS})",
     ),
     overwrite: bool = typer.Option(
         False, "-o", "--overwrite", help="Overwrite existing COGs"

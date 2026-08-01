@@ -51,13 +51,17 @@ def _add_forecast_item(
     item_id: str,
     day: int,
     reference_time: str,
+    leadtime_length: int = 93,
 ) -> None:
     item = Item(
         id=item_id,
         geometry=_GEOMETRY,
         bbox=_BBOX,
         datetime=datetime(2026, 1, day, tzinfo=timezone.utc),
-        properties={"forecast:reference_time": reference_time},
+        properties={
+            "forecast:reference_time": reference_time,
+            "forecast:leadtime_length": leadtime_length,
+        },
     )
     item.add_asset(
         "cog",
@@ -97,6 +101,7 @@ def test_refresh_collection_summaries_from_items():
             item_id=f"item-{day}",
             day=day,
             reference_time=ref,
+            leadtime_length=93,
         )
 
     refresh_collection_summaries(collection)
@@ -106,4 +111,5 @@ def test_refresh_collection_summaries_from_items():
         "2026-01-01T00:00:00Z",
         "2026-01-02T00:00:00Z",
     ]
+    assert summaries["forecast:leadtime_length"] == [93]
     assert summaries["forecast:variable"] == ["sic", "sit"]

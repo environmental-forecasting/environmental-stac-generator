@@ -47,7 +47,6 @@ class BaseSTAC:
         self,
         data_path: Path = Path("data"),
         catalog_defs: dict | None = None,
-        catalog_name: str = "default",
         license: str | None = None,
     ):
         """
@@ -60,9 +59,6 @@ class BaseSTAC:
             catalog_defs (optional): Dictionary of metadata for the root STAC catalog.
                 If not provided, defaults to a standard BAS environmental forecast catalog
                 definition.
-            catalog_name (optional): The catalog dir where the generated STAC catalog JSON
-                file should be saved.
-                Defaults to "default".
             license (optional): SPDX license identifier for the items in the STAC catalog.
                 Defaults to `"OGL-UK-3.0"` if not provided.
         """
@@ -79,7 +75,7 @@ class BaseSTAC:
         )  # Ref: https://spdx.org/licenses/
 
         self._load_dotenv()
-        self._set_catalog_path(catalog_name=catalog_name)
+        self._set_catalog_path()
         self.get_or_create_catalog(catalog_defs=catalog_defs)
 
     def _load_dotenv(self) -> None:
@@ -95,20 +91,15 @@ class BaseSTAC:
         self._FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", None)
         logger.info(f"FILE_SERVER_URL: {self._FILE_SERVER_URL}")
 
-    def _set_catalog_path(self, catalog_name: str) -> None:
+    def _set_catalog_path(self) -> None:
         """
         Configure the STAC output directory and catalog file path.
 
-        Creates `data/stac/<catalog_name>/` within `self.data_path` if it does
-        not exist, and uses `catalog.json` in that directory as the catalog file
-        (the ingest entry point for that `-n` name).
-
-        Args:
-            catalog_name: Directory name under `data/stac/` where the STAC catalog
-                file will be saved. Defaults to `default` when not overridden via
-                `-n`.
+        Creates the `stac` subdirectory within `self.data_path` if it doesn't exist,
+        and uses `catalog.json` in that directory as the shared root catalog file.
+        Collections from each `-n` name are added as children of this catalog.
         """
-        self._stac_output_dir = self.data_path / "stac" / catalog_name
+        self._stac_output_dir = self.data_path / "stac"
         self._stac_output_dir.mkdir(parents=True, exist_ok=True)
         self._stac_catalog_file = self._stac_output_dir / "catalog.json"
 
@@ -1011,13 +1002,11 @@ class STACGenerator(BaseSTAC):
         """
         Save the STAC catalog and update asset URLs with a base server URL.
 
-        Normalises hrefs against this catalog's own `catalog.json` path so each
-        `-n` name keeps an independent catalog under `data/stac/<name>/`.
-        (Normalising against the directory alone collapses into a shared root when
-        the directory name matches the collection id.)
+        Normalises all HREFs in the shared root catalog under `data/stac/`, replaces
+        local file paths with a base URL if specified, and writes the catalog to disk.
         """
         catalog = self.catalog
-        catalog.normalize_hrefs(str(self._stac_catalog_file))
+        catalog.normalize_hrefs(str(self._stac_output_dir))
 
         ## Replace file path prefix in "href" with URL base
         FILE_SERVER_URL = self._FILE_SERVER_URL

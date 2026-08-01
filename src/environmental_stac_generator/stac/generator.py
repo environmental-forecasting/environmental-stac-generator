@@ -31,8 +31,12 @@ from ..utils import (
     parse_forecast_frequency,
     proj_to_geo,
 )
-from .utils import ConfigMismatchError, add_file_info_to_asset, to_cwd_relative_href
-
+from .utils import (
+    ConfigMismatchError,
+    add_file_info_to_asset,
+    refresh_collection_summaries,
+    to_cwd_relative_href,
+)
 logger = logging.getLogger(__name__)
 
 # Datetime format constants used for STAC asset generation
@@ -1011,11 +1015,16 @@ class STACGenerator(BaseSTAC):
         Normalises catalog/collection/item links under `data/stac/`, then rewrites
         asset hrefs to cwd-relative paths (e.g. `data/cogs/...`) so the static JSON
         has no host. `FILE_SERVER_URL` is applied later at ingest.
+
+        Collection summaries (forecast init times and variables) are refreshed
+        from Items before writing so clients can build date pickers without
+        listing every Item.
         """
         catalog = self.catalog
         catalog.normalize_hrefs(str(self._stac_output_dir))
 
         for collection in catalog.get_all_collections():
+            refresh_collection_summaries(collection)
             for asset in collection.assets.values():
                 asset.href = to_cwd_relative_href(asset.href)
         for item in catalog.get_items(recursive=True):

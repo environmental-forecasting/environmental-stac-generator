@@ -2,17 +2,54 @@ import hashlib
 import mimetypes
 import os
 from pathlib import Path
+from typing import Any
 
 import rasterio
 import xarray as xr
 import zarr
-from pystac import Asset, Catalog
+from pystac import Asset, Catalog, Collection, MediaType, Summaries
 from multiformats import multihash
 from pystac.extensions.file import FileExtension
+from pystac.utils import datetime_to_str
 
 
 class ConfigMismatchError(Exception):
     pass
+
+
+def refresh_collection_summaries(collection: Collection) -> None:
+    """
+    Rebuild Collection summaries from its Items.
+
+    Writes ``forecast:reference_time`` (sorted unique init times) and, when
+    present on COG assets, ``forecast:variable`` (sorted unique band names).
+    Summaries use a high enough ``maxcount`` so large forecast archives are
+    not truncated by pystac's default of 25.
+    """
+    reference_times: set[str] = set()
+    variables: set[str] = set()
+
+    for item in collection.get_items():
+        ref = item.properties.get("forecast:reference_time")
+        if not ref and item.datetime is not None:
+            ref = datetime_to_str(item.datetime)
+        if ref:
+            reference_times.add(ref)
+
+        for asset in item.get_assets(media_type=MediaType.COG, role="data").values():
+            for band in asset.extra_fields.get("forecast:bands") or []:
+                name = band.get("name")
+                if name:
+                    variables.add(str(name))
+
+    summary_dict: dict[str, Any] = {}
+    if reference_times:
+        summary_dict["forecast:reference_time"] = sorted(reference_times)
+    if variables:
+        summary_dict["forecast:variable"] = sorted(variables)
+
+    maxcount = max(len(reference_times), len(variables), 25)
+    collection.summaries = Summaries(summary_dict, maxcount=maxcount)
 
 
 def to_cwd_relative_href(href: str, cwd: Path | None = None) -> str:

@@ -1,5 +1,4 @@
 import logging
-import os
 from abc import abstractmethod
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
@@ -14,7 +13,6 @@ import rasterio
 import xarray as xr
 from dateutil.relativedelta import relativedelta
 from deepdiff import DeepDiff
-from dotenv import find_dotenv, load_dotenv
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
 from pystac.utils import datetime_to_str, str_to_datetime
@@ -32,7 +30,7 @@ from ..utils import (
     parse_forecast_frequency,
     proj_to_geo,
 )
-from .utils import ConfigMismatchError, add_file_info_to_asset
+from .utils import ConfigMismatchError, add_file_info_to_asset, to_cwd_relative_href
 
 logger = logging.getLogger(__name__)
 
@@ -74,22 +72,8 @@ class BaseSTAC:
             license if license else "OGL-UK-3.0"
         )  # Ref: https://spdx.org/licenses/
 
-        self._load_dotenv()
         self._set_catalog_path()
         self.get_or_create_catalog(catalog_defs=catalog_defs)
-
-    def _load_dotenv(self) -> None:
-        """
-        Load environment variables and configure the file server URL.
-
-        This method loads the `.env` file and retrieves the `FILE_SERVER_URL`
-        environment variable, which is used as the base URL for STAC catalog hrefs.
-        """
-        # The base URL for the STAC catalogs.
-        # If set, the root of the STAC href links will use this url as the base path
-        load_dotenv(find_dotenv(usecwd=True))
-        self._FILE_SERVER_URL = os.getenv("FILE_SERVER_URL", None)
-        logger.info(f"FILE_SERVER_URL: {self._FILE_SERVER_URL}")
 
     def _set_catalog_path(self) -> None:
         """
@@ -705,7 +689,7 @@ class STACGenerator(BaseSTAC):
 
                 # Add netCDF asset to item
                 nc_asset = Asset(
-                        href=str(out_nc_file),
+                        href=str(out_nc_file.resolve()),
                         media_type=pystac.MediaType.NETCDF,
                         title=f"Full forecast netCDF from {forecast_reference_time.strftime(DT_FMT_DISPLAY)}",
                         description="netCDF file container forecast variables for forecast"
@@ -721,28 +705,40 @@ class STACGenerator(BaseSTAC):
                 item.add_asset(key="netcdf", asset=nc_asset)
                 nc_asset = add_file_info_to_asset(nc_asset, nc_asset.href)
 
-                process_args = (
+                # Load the forecast-init slice once, then hand each worker only its
+                # leadtime (deep copy) so pickling stays small and does not send the
+                # full leadtime stack to every process.
+                ds_time_slice = ds_time_slice.load()
+                common_args = (
                     forecast_reference_time,
                     leadtime_unit,
                     leadtime_step,
-                    ds_time_slice,
                     x_coord,
                     y_coord,
                     crs,
                     cog_dir,
                     stac_only,
-                    item,
+                    item_id,
                     valid_bands,
                     overwrite,
+                    self._compress_method,
                 )
 
-                # Process each leadtime
+                # Process each leadtime. Use a staticmethod so ProcessPoolExecutor
+                # does not pickle this STACGenerator / Catalog (which mutates as
+                # assets are added and caused "dictionary changed size during iteration").
                 with ProcessPoolExecutor(max_workers=workers) as executor:
                     with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
                         futures = []
                         for i in range(nleadtime):
+                            ds_leadtime_slice = ds_time_slice.isel(
+                                leadtime=i
+                            ).copy(deep=True)
                             future = executor.submit(
-                                self._process_leadtime, i, *process_args
+                                STACGenerator._process_leadtime,
+                                i,
+                                ds_leadtime_slice,
+                                *common_args,
                             )
                             future.add_done_callback(lambda _: pbar.update(1))
                             futures.append(future)
@@ -767,41 +763,43 @@ class STACGenerator(BaseSTAC):
         self.save_catalog()
 
 
+    @staticmethod
     def _process_leadtime(
-        self,
         i: int,
+        ds_leadtime_slice: xr.Dataset,
         forecast_reference_time: datetime,
         leadtime_unit: str,
         leadtime_step: int,
-        ds_time_slice: xr.Dataset,
         x_coord: str,
         y_coord: str,
         crs: str,
         cog_dir: Path,
         stac_only: bool,
-        item: pystac.Item,
+        item_id: str,
         valid_bands: list[str],
         overwrite: bool,
-        reproject: bool=False,
+        compress_method: str,
+        reproject: bool = False,
     ):
         """
         Process a single leadtime slice to generate COG and thumbnail assets.
 
         Args:
             i: Index of the current leadtime.
+            ds_leadtime_slice: In-memory xarray Dataset for this leadtime only.
             forecast_reference_time: The forecast initialisation time.
             leadtime_unit: Unit of leadtime (e.g., 'days').
             leadtime_step: Step size for leadtimes.
-            ds_time_slice: xarray Dataset slice for the current forecast time.
             x_coord: X dimension coordinate name.
             y_coord: Y dimension coordinate name.
             crs: Coordinate Reference System (EPSG code).
             cog_dir: Output directory path for COG files.
             stac_only: Whether to generate only STAC metadata (no COGs or thumbnails).
-            item: Item to which assets will be added.
+            item_id: STAC Item id used to build COG/thumbnail filenames.
             valid_bands: List of valid variable names to process.
                 i.e., having 4 dimensions (time, yc, xc, leadtime).
             overwrite: Whether to overwrite existing files.
+            compress_method: COG compression method (e.g. ``DEFLATE`` or ``NONE``).
             reproject: Whether to reproject to EPSG:4326.
                 Defaults to False.
 
@@ -814,7 +812,6 @@ class STACGenerator(BaseSTAC):
         valid_time = forecast_reference_time + relativedelta(
             **{leadtime_unit: i * leadtime_step} # type: ignore
         )
-        ds_leadtime_slice = ds_time_slice.isel(leadtime=i)
 
         # Set spatial dimensions for rioxarray
         ds_leadtime_slice.rio.set_spatial_dims(
@@ -824,7 +821,7 @@ class STACGenerator(BaseSTAC):
         valid_time_str = datetime_to_str(valid_time)
 
         # Add STAC Item for this file
-        item_id_cog = f"{item.id}_lead_{valid_time.strftime(DT_FMT_FILENAME)}"
+        item_id_cog = f"{item_id}_lead_{valid_time.strftime(DT_FMT_FILENAME)}"
 
         # Define cog/thumbnail output paths
         cog_file = cog_dir / f"{item_id_cog}.tif"
@@ -864,12 +861,20 @@ class STACGenerator(BaseSTAC):
             else:
                 pbar_description = f"Saving vars to multi-band COG: {cog_file}"
 
-                self._write_cog(da_multiband, x_coord, y_coord, crs, cog_file, reproject=reproject)
+                STACGenerator._write_cog(
+                    da_multiband,
+                    x_coord,
+                    y_coord,
+                    crs,
+                    cog_file,
+                    compress_method,
+                    reproject=reproject,
+                )
 
             # Create thumbnail plot for only the first variable for the first leadtime
             if i == 0:
                 if not thumbnail_file.exists() or overwrite:
-                    self._create_and_write_thumbnail(
+                    STACGenerator._create_and_write_thumbnail(
                         da_multiband,
                         thumbnail_file,
                         forecast_reference_time,
@@ -889,7 +894,7 @@ class STACGenerator(BaseSTAC):
         cog_asset = dict(
             key=valid_time_str,
             asset=Asset(
-                href=str(cog_file),
+                href=str(cog_file.resolve()),
                 media_type=pystac.MediaType.COG,
                 title=f"Forecast at {valid_time.strftime(DT_FMT_DISPLAY)}",
                 description=f"Variables: {', '.join(band_names)}",
@@ -905,7 +910,6 @@ class STACGenerator(BaseSTAC):
             ),
         )
         assets.append(cog_asset)
-        item.stac_extensions.append("projection")
 
         # Create a thumbnail plot of the first variable for the first leadtime
         if i == 0:
@@ -914,7 +918,7 @@ class STACGenerator(BaseSTAC):
             thumbnail_asset = dict(
                 key="thumbnail",
                 asset=Asset(
-                    href=str(thumbnail_file),
+                    href=str(thumbnail_file.resolve()),
                     media_type=pystac.MediaType.JPEG,
                     title="Thumbnail",
                     roles=["thumbnail"],
@@ -944,14 +948,15 @@ class STACGenerator(BaseSTAC):
             encoding=encoding,
         )
 
+    @staticmethod
     def _write_cog(
-        self,
         da_multiband: xr.DataArray,
         x_coord: str,
         y_coord: str,
         crs: str,
         cog_file: Path,
-        reproject: bool=False,
+        compress_method: str,
+        reproject: bool = False,
     ):
         """
         Write a multiband DataArray as a Cloud Optimized GeoTIFF (COG).
@@ -962,6 +967,7 @@ class STACGenerator(BaseSTAC):
             y_coord: Y dimension coordinate name.
             crs: Coordinate Reference System (EPSG code).
             cog_file: Path to the output COG file.
+            compress_method: COG compression method (e.g. ``DEFLATE`` or ``NONE``).
             reproject: Whether to reproject to EPSG:4326.
                 Defaults to False.
         """
@@ -971,11 +977,10 @@ class STACGenerator(BaseSTAC):
         da_multiband.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
         if reproject:
             da_multiband = da_multiband.rio.reproject("EPSG:4326", inplace=False)
-        # da_multiband.rio.to_raster(cog_path, driver="COG", compress=self._compress_method)
-        write_cog(cog_file, da_multiband, compress=self._compress_method)
+        write_cog(cog_file, da_multiband, compress=compress_method)
 
+    @staticmethod
     def _create_and_write_thumbnail(
-        self,
         da_multiband: xr.DataArray,
         thumbnail_file: Path,
         forecast_reference_time: datetime,
@@ -1000,30 +1005,20 @@ class STACGenerator(BaseSTAC):
 
     def save_catalog(self):
         """
-        Save the STAC catalog and update asset URLs with a base server URL.
+        Save the STAC catalog with portable asset hrefs.
 
-        Normalises all HREFs in the shared root catalog under `data/stac/`, replaces
-        local file paths with a base URL if specified, and writes the catalog to disk.
+        Normalises catalog/collection/item links under `data/stac/`, then rewrites
+        asset hrefs to cwd-relative paths (e.g. `data/cogs/...`) so the static JSON
+        has no host. `FILE_SERVER_URL` is applied later at ingest.
         """
         catalog = self.catalog
         catalog.normalize_hrefs(str(self._stac_output_dir))
 
-        ## Replace file path prefix in "href" with URL base
-        FILE_SERVER_URL = self._FILE_SERVER_URL
-        if FILE_SERVER_URL:
-            if not FILE_SERVER_URL.endswith("/"):
-                FILE_SERVER_URL += "/"
-
-            for item in catalog.get_all_items():
-                for asset_key, asset in item.assets.items():
-                    abs_href = asset.get_absolute_href()
-                    if abs_href and not abs_href.startswith(("http://", "https://")):
-                        try:
-                            # Resolve the absolute path relative to the current working directory
-                            rel_path = Path(abs_href).relative_to(Path.cwd())
-                            asset.href = FILE_SERVER_URL + str(rel_path)
-                        except ValueError:
-                            # If not relative to CWD, leave it as is
-                            pass
+        for collection in catalog.get_all_collections():
+            for asset in collection.assets.values():
+                asset.href = to_cwd_relative_href(asset.href)
+        for item in catalog.get_items(recursive=True):
+            for asset in item.assets.values():
+                asset.href = to_cwd_relative_href(asset.href)
 
         catalog.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)

@@ -26,19 +26,11 @@ pip install -e .
 
 This tool is designed to be used with [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator).
 
-The preprocessing step can be run with the following command:
+Pass an orchestrator environment file with `--env-file` for **ingest** (database credentials and `FILE_SERVER_URL`). Preprocess does not need it: the static catalog stores portable cwd-relative asset paths (e.g. `data/cogs/...`), and ingest prefixes `FILE_SERVER_URL` when loading into pgSTAC.
 
 ```bash
 envstacgen preprocess 1days ./results/predict/*.nc
-```
-
-It expects an `.env` file where you're running the command from, with `FILE_SERVER_URL` variable pointing to the location of the file server where the outputs from this command will be served from.
-
-e.g.
-
-```bash
-#.env
-FILE_SERVER_URL=http://localhost:8002
+envstacgen --env-file .env.development ingest data/stac/catalog.json -o
 ```
 
 ### Positional Parameters
@@ -48,6 +40,12 @@ The first parameter is the forecast frequency (e.g., "6hours", "1days").
 The second and further arguments are the paths to one or more `.nc` files, directories, or wildcard patterns.
 
 ### Options
+
+Global option (before the subcommand):
+
+| Flag | Description |
+| ---- | ----------- |
+| `--env-file` | Path to an environment file (e.g. `.env.development`) |
 
 The optional flags that can be used are:
 
@@ -59,7 +57,7 @@ The optional flags that can be used are:
 | `--workers`, `-w`     | Set max number of concurrent workers (default: 4)                      |
 | `--stac-only`, `-s`   | Output only the STAC files, not COGs/Thumbnails (default not enabled)  |
 
-The ingestion requires the [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator) docker compose environment to be running (since it will ingest into a PostgreSQL database). Please follow the [README](https://github.com/environmental-forecasting/environmental-stac-orchestrator/blob/main/README.md) from it.
+The ingestion step requires a reachable PostgreSQL/pgSTAC instance (typically the [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator) stack). See that repository’s README.
 
 ## Example
 
@@ -73,15 +71,16 @@ This will:
 * Detect the hemisphere automatically
 * Convert each leadtime slice to a COG
 * Process the COG outputs into `data/cogs/{collection}/{date}/`
-* Build a hierarchical STAC catalog in `data/stac/`
+* Build a hierarchical STAC catalog in `data/stac/` with portable asset hrefs
 
 ### Step 2
 
 ```bash
-envstacgen ingest data/stac/catalog.json -o
+envstacgen --env-file .env.development ingest data/stac/catalog.json -o
 ```
 
 This will:
+* Prefix asset hrefs with `FILE_SERVER_URL` for this environment
 * Ingest the catalog into the PostgreSQL database.
 
 ## License

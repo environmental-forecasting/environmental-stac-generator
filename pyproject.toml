@@ -27,6 +27,7 @@ dependencies = [
     "psycopg[pool,binary]",
     "pypgstac",
     "pystac",
+    "pydantic-settings",
     "python-dotenv",
     "rich[jupyter]",
     "rio-cogeo",
@@ -42,7 +43,6 @@ dev = [
     "coverage",
     "mypy",
     "pytest",
-    "pytest-mock",
     "ruff",
     "ipython==8.18.0",
     "prompt_toolkit==3.0.36"

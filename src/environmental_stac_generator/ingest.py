@@ -1,64 +1,46 @@
 import logging
-import os
+from pathlib import Path
 
-from dotenv import load_dotenv, find_dotenv
-
+from .config import get_settings
 from .stac.dataloader import PGSTACDataLoader
 
 logger = logging.getLogger(__name__)
 
 
-def main(catalog: str, overwrite: bool = False) -> None:
+def main(
+    catalog: str,
+    overwrite: bool = False,
+    env_file: str | Path | None = None,
+) -> None:
     """
     Main function to ingest pre-generated STAC catalogs into pgSTAC database.
 
     Loads a JSON STAC catalog file using the `PGSTACDataLoader`, which communicates
     with a running instance of [stac-fastapi](https://github.com/stac-utils/stac-fastapi)
     (e.g., pgSTAC), to ingest the catalog into a PostgreSQL/PostGIS database.
+    Portable asset hrefs (e.g. `data/cogs/...`) are prefixed with `FILE_SERVER_URL`
+    from settings before load.
 
     Args:
         catalog: Path to the JSON STAC catalog file to be ingested.
         overwrite: Whether to overwrite any existing matching collections/items.
                    Defaults to False.
+        env_file: Optional path to an environment file (e.g. ``.env.development``).
 
     Raises:
         FileNotFoundError: If no valid JSON files are found for ingestion.
-
-    Raises:
-        ValueError: If the `STAC_FASTAPI_URL` environment variable is not set.
-        ConnectionError: If the STAC API is unreachable or unresponsive.
         Exception: Any exception raised by the underlying `PGSTACDataLoader`.
 
     Examples:
-        >>> dashboard ingest data/stac/catalog.json
+        >>> envstacgen --env-file .env.development ingest data/stac/catalog.json
     """
+    config = get_settings(env_file)
+    pg_db_url = config.database_url
 
-    # Configuration
-    load_dotenv(find_dotenv(usecwd=True))
-
-    db_info = {
-        "HOST_IP": os.getenv("HOST_IP", None),
-        "DATABASE_PORT": os.getenv("DATABASE_PORT", None),
-        "DATABASE_USER": os.getenv("DATABASE_USER", None),
-        "DATABASE_PASSWORD": os.getenv("DATABASE_PASSWORD", None),
-        "DATABASE_DBNAME": os.getenv("DATABASE_DBNAME", None),
-    }
-
-    for key, value in db_info.items():
-        if value is None:
-            raise ValueError(f"Missing required environment variable: {key}")
-
-    pg_db_url = (
-        f"postgresql://{db_info['DATABASE_USER']}:{db_info['DATABASE_PASSWORD']}"
-        f"@{db_info['HOST_IP']}:{db_info['DATABASE_PORT']}/{db_info['DATABASE_DBNAME']}"
+    loader = PGSTACDataLoader(
+        pg_db_url,
+        file_server_url=config.file_server_url,
     )
-
-    # stac_api_url = os.getenv("STAC_FASTAPI_URL", None) # E.g. "http://localhost:8081"
-    # if not stac_api_url:
-    #     logger.error("No STAC API URL specified in environment variable 'STAC_FASTAPI_URL'")
-    #     exit(1)
-
-    loader = PGSTACDataLoader(pg_db_url)
 
     # Actually load the STAC metadata into PgSTAC database
     loader.ingest_stac_catalog(catalog_file=catalog, overwrite=overwrite)

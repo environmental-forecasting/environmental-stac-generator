@@ -1,17 +1,77 @@
 import hashlib
 import mimetypes
 import os
+from pathlib import Path
 
 import rasterio
 import xarray as xr
 import zarr
-from pystac import Asset
+from pystac import Asset, Catalog
 from multiformats import multihash
 from pystac.extensions.file import FileExtension
 
 
 class ConfigMismatchError(Exception):
     pass
+
+
+def to_cwd_relative_href(href: str, cwd: Path | None = None) -> str:
+    """
+    Convert a local filesystem href to a path relative to ``cwd``.
+
+    Absolute paths under ``cwd`` become portable values such as ``data/cogs/...``.
+    HTTP(S) hrefs and paths outside ``cwd`` are returned unchanged.
+    """
+    if not href or href.startswith(("http://", "https://")):
+        return href
+    root = (cwd or Path.cwd()).resolve()
+    path = Path(href)
+    path = path.resolve() if path.is_absolute() else (root / path).resolve()
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return href
+
+
+def apply_file_server_url(href: str, file_server_url: str, cwd: Path | None = None) -> str:
+    """
+    Prefix a local/portable asset href with ``file_server_url``.
+
+    Already-absolute HTTP(S) hrefs are left unchanged so catalogs generated for
+    another environment are not silently rewritten.
+    """
+    if not href or href.startswith(("http://", "https://")):
+        return href
+    if not file_server_url:
+        return href
+
+    base = file_server_url if file_server_url.endswith("/") else file_server_url + "/"
+    root = (cwd or Path.cwd()).resolve()
+    path = Path(href)
+    if path.is_absolute():
+        try:
+            rel = path.resolve().relative_to(root)
+        except ValueError:
+            return href
+    else:
+        # Portable cwd-relative paths written by preprocess (e.g. data/cogs/...).
+        rel = path
+
+    return base + str(rel).lstrip("./")
+
+
+def rewrite_catalog_asset_hrefs(
+    catalog: Catalog,
+    file_server_url: str,
+    cwd: Path | None = None,
+) -> None:
+    """Apply ``file_server_url`` to all collection and item asset hrefs in-place."""
+    for collection in catalog.get_all_collections():
+        for asset in collection.assets.values():
+            asset.href = apply_file_server_url(asset.href, file_server_url, cwd=cwd)
+    for item in catalog.get_items(recursive=True):
+        for asset in item.assets.values():
+            asset.href = apply_file_server_url(asset.href, file_server_url, cwd=cwd)
 
 
 def file_multihash(file_path: str) -> str:

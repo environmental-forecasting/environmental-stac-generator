@@ -7,6 +7,8 @@ from pypgstac.db import PgstacDB
 from pypgstac.load import Loader, Methods
 from pystac import Catalog
 
+from .utils import rewrite_catalog_asset_hrefs
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -29,9 +31,16 @@ class PGSTACDataLoader:
         stac_api_url: Base URL of the STAC API (without trailing slash).
         _use_api: If set, collection/item existence checks use the legacy STAC API;
                   otherwise, direct database queries are used.
+        file_server_url: Optional base URL prefixed onto portable asset hrefs
+            (e.g. ``data/cogs/...``) at ingest time.
     """
 
-    def __init__(self, pg_db_url: str, stac_api_url: str = ""):
+    def __init__(
+        self,
+        pg_db_url: str,
+        stac_api_url: str = "",
+        file_server_url: str | None = None,
+    ):
         """Initialise PGSTACDataLoader with database and STAC API configurations.
 
         Args:
@@ -41,9 +50,12 @@ class PGSTACDataLoader:
                 for compatibility, but direct database queries are recommended
                 for performance.
                 Defaults to "".
+            file_server_url (optional): Base URL for asset files. Prefixed onto
+                local/portable hrefs when ingesting. Defaults to None.
         """
         self.db = PgstacDB(dsn=pg_db_url)
         self.loader = Loader(self.db)
+        self.file_server_url = file_server_url
         if stac_api_url:
             self.stac_api_url = stac_api_url.rstrip("/")
             if not self.wait_for_api():
@@ -117,6 +129,11 @@ class PGSTACDataLoader:
             raise FileNotFoundError(f"Catalog file not found: {catalog_file}")
 
         self.catalog = Catalog.from_file(str(catalog_file))
+        if self.file_server_url:
+            logger.info(
+                "Applying FILE_SERVER_URL to asset hrefs: %s", self.file_server_url
+            )
+            rewrite_catalog_asset_hrefs(self.catalog, self.file_server_url)
         self._load_collections_from_file(overwrite=overwrite)
         return True
 
@@ -139,7 +156,7 @@ class PGSTACDataLoader:
 
         # Prepare items to load (skip if exists and overwrite==False)
         items_to_load = []
-        for item in self.catalog.get_all_items():
+        for item in self.catalog.get_items(recursive=True):
             if not overwrite and self.item_exists(item.collection_id, item.id): # type: ignore
                 logger.info(
                     f"Skipping existing item {item.id} in collection {item.collection_id}"

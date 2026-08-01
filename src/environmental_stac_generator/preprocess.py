@@ -24,8 +24,9 @@ def main(
     """
     Main function to generate COGs and generate static JSON STAC catalog.
 
-    This function processes netCDF files and generates cloud-optimized geotiffs (COGs)
-    using the given CLI arguments.
+    This function processes netCDF files and generates cloud-optimised GeoTIFFs (COGs)
+    using the given CLI arguments. Asset hrefs in the static catalog are cwd-relative
+    (portable); apply ``FILE_SERVER_URL`` at ingest.
 
     Args:
         forecast_frequency: The frequency of forecasts.
@@ -43,8 +44,7 @@ def main(
         None
 
     Examples:
-        To output a catalog for daily forecasting:
-        >>> dashboard preprocess 1days raw_data/*.nc -o -f --name icenet
+        >>> envstacgen preprocess 1days raw_data/*.nc -o --name icenet
     """
     if input is None:
         default_dir = "results/predict"

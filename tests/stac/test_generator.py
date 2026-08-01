@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import mock_open
+from unittest.mock import mock_open, patch
 
 import numpy as np
 import orjson
@@ -67,7 +67,7 @@ def test_set_out_paths(stac, tmp_path):
     assert stac._config_output_path == tmp_path / "config.json"
 
 
-def test_store_config_new_file(stac, tmp_path, mocker):
+def test_store_config_new_file(stac, tmp_path):
     """
     Test that `STACGenerator._store_config` creates a new config file when it doesn't exist.
 
@@ -78,7 +78,6 @@ def test_store_config_new_file(stac, tmp_path, mocker):
     Args:
         stac: STAC generator instance with test configuration
         tmp_path: pytest temporary directory fixture for output paths
-        mocker: pytest-mocker fixture for mocking file operations
     """
     # Note: I'm storing one collection in one catalog file for simplicity
     # so, catalog and collection name are the same.
@@ -87,10 +86,12 @@ def test_store_config_new_file(stac, tmp_path, mocker):
     config = {stac._collection_name: {"forecast_frequency": "1days"}}
 
     # Mock writing to a config file that does not exist
-    m = mocker.patch("builtins.open", mock_open())
-    mocker.patch("pathlib.Path.exists", return_value=False)
-
-    stac._store_config(config)
+    m = mock_open()
+    with (
+        patch("builtins.open", m),
+        patch("pathlib.Path.exists", return_value=False),
+    ):
+        stac._store_config(config)
 
     handle = m()
     handle.write.assert_called_once()
@@ -98,7 +99,7 @@ def test_store_config_new_file(stac, tmp_path, mocker):
     assert orjson.loads(written)[stac._collection_name]["forecast_frequency"] == "1days"
 
 
-def test_store_config_existing_mismatch(stac, tmp_path, mocker):
+def test_store_config_existing_mismatch(stac, tmp_path):
     """
     Test that `STACGenerator._store_config` raises `ConfigMismatchError` when existing config doesn't match.
 
@@ -109,7 +110,6 @@ def test_store_config_existing_mismatch(stac, tmp_path, mocker):
     Args:
         stac: STAC generator instance with test configuration
         tmp_path: pytest temporary directory fixture for output paths
-        mocker: pytest-mocker fixture for mocking file operations
 
     Raises:
         ConfigMismatchError: Expected when attempting to overwrite an existing config that doesn't match.
@@ -122,13 +122,14 @@ def test_store_config_existing_mismatch(stac, tmp_path, mocker):
     existing_config = {stac._collection_name: {"forecast_frequency": "2days"}}
     mock_open_read = mock_open(read_data=orjson.dumps(existing_config))
 
-    mocker.patch("builtins.open", mock_open_read)
-    mocker.patch("pathlib.Path.exists", return_value=True)
-
-    # Since the existing config and the new one don't match,
-    # it should raise an error upon trying to validation
-    # and store the updated config
-    with pytest.raises(ConfigMismatchError):
+    with (
+        patch("builtins.open", mock_open_read),
+        patch("pathlib.Path.exists", return_value=True),
+        pytest.raises(ConfigMismatchError),
+    ):
+        # Since the existing config and the new one don't match,
+        # it should raise an error upon trying to validation
+        # and store the updated config
         stac._store_config(config)
 
 
@@ -196,7 +197,7 @@ def test_get_bbox_and_geometry_epsg4326(stac):
     assert geometry == expected_geometry
 
 
-def test_get_bbox_and_geometry_with_projection(stac, mocker):
+def test_get_bbox_and_geometry_with_projection(stac):
     """
     Test that `STACGenerator._get_bbox_and_geometry` correctly computes the bounding box and geometry using a projected coordinate system (EPSG:6931).
 
@@ -206,7 +207,6 @@ def test_get_bbox_and_geometry_with_projection(stac, mocker):
 
     Args:
         stac: STAC generator instance
-        mocker: pytest-mocker fixture for mocking projection conversion
 
     Asserts:
         - The returned `bbox` matches the expected geographic bounds after projection conversion
@@ -223,26 +223,23 @@ def test_get_bbox_and_geometry_with_projection(stac, mocker):
     y_coord = "yc"
     crs = "EPSG:6931"  # Projection used for IceNet northern hemisphere
 
-    # from environmental_stac_generator.utils import proj_to_geo
-    # bbox = [xc.min(), yc.min(), xc.max(), yc.max()]
-    # test = proj_to_geo(bbox, src_crs=crs)
-    # print("test bbox:", test)
-
     # Expected output from proj_to_geo
     expected_bbox = (-180.0, -78.49911570449875, 180.0, 90.0)
 
     # Mock proj_to_geo
-    mocker.patch(
-        "environmental_stac_generator.stac.generator.proj_to_geo", return_value=expected_bbox
-    )
-
-    returned_bbox, geometry = stac._get_bbox_and_geometry(ds, x_coord, y_coord, crs)
+    with patch(
+        "environmental_stac_generator.stac.generator.proj_to_geo",
+        return_value=expected_bbox,
+    ):
+        returned_bbox, geometry = stac._get_bbox_and_geometry(
+            ds, x_coord, y_coord, crs
+        )
 
     np.testing.assert_allclose(returned_bbox, expected_bbox, atol=1e-5)
     assert geometry == mapping(box(*expected_bbox))
 
 
-def test_get_forecast_info(stac, sample_sic_ds, mocker):
+def test_get_forecast_info(stac, sample_sic_ds):
     """
     Test that `STACGenerator.get_forecast_info` returns the correct metadata from a forecast dataset.
 
@@ -257,16 +254,14 @@ def test_get_forecast_info(stac, sample_sic_ds, mocker):
     Args:
         stac: STAC generator instance
         sample_sic_ds: Mock dataset fixture for testing forecast data
-        mocker: pytest-mocker fixture for mocking `xarray.open_dataset`
 
     Asserts:
         - The returned object is a tuple
         - `crs` is set to "EPSG:6931"
         - Expected bands are included in the `valid_bands` list
     """
-    mocker.patch("xarray.open_dataset", return_value=sample_sic_ds)
-
-    result = stac.get_forecast_info(Path("/test_forecast_north.nc"))
+    with patch("xarray.open_dataset", return_value=sample_sic_ds):
+        result = stac.get_forecast_info(Path("/test_forecast_north.nc"))
 
     assert isinstance(result, tuple)
 

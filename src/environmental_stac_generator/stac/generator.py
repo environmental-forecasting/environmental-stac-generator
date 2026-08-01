@@ -99,20 +99,18 @@ class BaseSTAC:
         """
         Configure the STAC output directory and catalog file path.
 
-        Creates the 'stac' subdirectory within `self.data_path` if it doesn't exist.
-        If no custom catalog file is provided, uses 'catalog.json' as the default
-        catalog file name. Otherwise, uses the specified file path.
+        Creates `data/stac/<catalog_name>/` within `self.data_path` if it does
+        not exist, and uses `catalog.json` in that directory as the catalog file
+        (the ingest entry point for that `-n` name).
 
         Args:
-            catalog_file_name: Optional dirname to use where the STAC catalog file
-                will be saved.
-                If None, defaults to 'default' in the STAC output directory.
+            catalog_name: Directory name under `data/stac/` where the STAC catalog
+                file will be saved. Defaults to `default` when not overridden via
+                `-n`.
         """
-        # This has dir with `name` created by itself
         self._stac_output_dir = self.data_path / "stac" / catalog_name
         self._stac_output_dir.mkdir(parents=True, exist_ok=True)
-
-        self._stac_catalog_file = Path(self._stac_output_dir) / "catalog.json"
+        self._stac_catalog_file = self._stac_output_dir / "catalog.json"
 
     def get_or_create_catalog(
         self, catalog_defs: dict, describe: bool = True
@@ -312,19 +310,6 @@ class BaseSTAC:
         multiband = xr.concat(da_list, dim="band")
         multiband = multiband.assign_coords(band=("band", band_names))
         return multiband, band_names
-
-    def save_catalog(self, stac_output_dir):
-        """
-        Save the STAC catalog to disk with normalized HREFs.
-
-        Normalises all href references in the STAC catalog to use absolute paths
-        relative to the output directory and writes the catalog files to disk.
-
-        Args:
-            stac_output_dir: Directory path where STAC catalog files will be saved.
-        """
-        self._stac_catalog.normalize_hrefs(str(self._stac_catalog_file))
-        self._stac_catalog.save()
 
     @property
     def catalog(self) -> Catalog:
@@ -1026,12 +1011,13 @@ class STACGenerator(BaseSTAC):
         """
         Save the STAC catalog and update asset URLs with a base server URL.
 
-        This method normalizes all HREFs in the catalog, replaces local file paths
-        with a base URL if specified, and writes the final catalog to disk.
+        Normalises hrefs against this catalog's own `catalog.json` path so each
+        `-n` name keeps an independent catalog under `data/stac/<name>/`.
+        (Normalising against the directory alone collapses into a shared root when
+        the directory name matches the collection id.)
         """
         catalog = self.catalog
-        ## Normalize HREFs for the catalog and save
-        catalog.normalize_hrefs(str(self._stac_output_dir))
+        catalog.normalize_hrefs(str(self._stac_catalog_file))
 
         ## Replace file path prefix in "href" with URL base
         FILE_SERVER_URL = self._FILE_SERVER_URL

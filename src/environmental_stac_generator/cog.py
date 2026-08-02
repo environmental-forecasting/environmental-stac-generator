@@ -19,15 +19,15 @@ def write_cog(
     compress: str = "DEFLATE",
     block_size: int = 256,
     overview_level: int = 4,
-    external_overviews: bool = True,
+    external_overviews: bool = False,
 ) -> None:
     """
     Write a Cloud Optimized GeoTIFF (COG) from an xarray DataArray.
 
-    Creates both internal and external overviews (`.ovr` files), which are
-    necessary for compatibility with certain GIS tools like the STAC Browser.
-    It uses temporary files to first embed band-level statistics, then converts
-    the result into a COG using `rio-cogeo`.
+    Embeds band-level statistics, then converts to a COG with internal
+    overviews via ``rio-cogeo``. External ``.ovr`` sidecars are off by
+    default (COG internal overviews are enough for TiTiler / STAC Browser);
+    pass ``external_overviews=True`` if a workflow still needs them.
 
     Args:
         cog_path: Path where the final COG will be saved as a GeoTIFF file.
@@ -36,26 +36,19 @@ def write_cog(
         compress: Compression method to use for the COG.
             Defaults to "DEFLATE".
         block_size: Block size (in pixels) used for tiling.
-            Defaults to "256".
+            Defaults to 256.
         overview_level: Number of overviews to generate. This defines how many
             downsampled versions of the raster will be created.
             Defaults to 4.
-        external_overviews: If True, creates external `.ovr` files in addition
-            to internal overviews.
-            Defaults to True.
+        external_overviews: If True, also builds external ``.ovr`` files with
+            ``gdaladdo`` (extra preprocess cost; not required for COG readers).
+            Defaults to False.
 
     Notes:
-        - Requires GDAL (`gdaladdo`) for generating external overview files.
-          If GDAL is not installed or not found in the system PATH, this
-          function may fail.
-
         - Band-level statistics (minimum, maximum, mean, standard deviation)
           are embedded within the output COG using rasterio.
 
-        - This function creates both internal and external (".ovr") files.
-          The external because STAC Browser currently seems to look for them.
-          Found this when checking for browser console errors. But, not really
-          needed since internal overviews exist.
+        - ``external_overviews=True`` requires GDAL (``gdaladdo``) on PATH.
     """
     profile = cog_profiles.get("deflate")
     profile.update(
@@ -86,7 +79,7 @@ def write_cog(
                 }
                 src.update_tags(i, **stats_dict)
 
-        # Add external overviews using "gdaladdo"
+        # Optional external overviews on the temp GeoTIFF (moved after COG write).
         if external_overviews:
             subprocess.run(
                 [
@@ -94,7 +87,6 @@ def write_cog(
                     "-q",
                     "-ro",
                     str(tmp_path),
-                    # Define overview levels
                     "2",
                     "4",
                     "8",
@@ -116,7 +108,6 @@ def write_cog(
                 quiet=True,
             )
 
-        # Move external overview file to match final COG path
         if external_overviews:
             tmp_ovr_path = tmp_path.with_suffix(".tif.ovr")
             cog_ovr_path = cog_path.with_suffix(".tif.ovr")

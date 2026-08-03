@@ -1,16 +1,53 @@
 import logging
-import shutil
 import subprocess
-import tempfile
 from pathlib import Path
+from typing import Any, Sequence
 
 import numpy as np
-import rasterio
 import xarray as xr
+from rasterio.io import MemoryFile
 from rio_cogeo.cogeo import cog_translate
 from rio_cogeo.profiles import cog_profiles
 
+from .utils import get_array_statistics
+
 logger = logging.getLogger(__name__)
+
+# Band tags written into the COG (and mirrored into STAC forecast:bands).
+_STAT_TAG_KEYS = (
+    "STATISTICS_MINIMUM",
+    "STATISTICS_MAXIMUM",
+    "STATISTICS_MEAN",
+    "STATISTICS_STDDEV",
+    "STATISTICS_VALID_PERCENT",
+)
+
+
+def _band_stat_tags(stats: dict[str, Any] | None) -> dict[str, Any]:
+    if not stats:
+        return {}
+    return {
+        key: stats[key]
+        for key in _STAT_TAG_KEYS
+        if key in stats and stats[key] is not None
+    }
+
+
+def _dataarray_to_raster_array(da: xr.DataArray) -> tuple[np.ndarray, int, int, int]:
+    """Return (band, y, x) array plus count/height/width."""
+    y_dim = da.rio.y_dim
+    x_dim = da.rio.x_dim
+    height = int(da.sizes[y_dim])
+    width = int(da.sizes[x_dim])
+
+    if "band" in da.dims:
+        data = np.asarray(da.transpose("band", y_dim, x_dim).values)
+    else:
+        data = np.asarray(da.transpose(y_dim, x_dim).values)[np.newaxis, ...]
+
+    if data.ndim != 3:
+        raise ValueError(f"Expected 3D band/y/x array, got shape {data.shape}")
+    return data, int(data.shape[0]), height, width
 
 
 def write_cog(
@@ -20,14 +57,15 @@ def write_cog(
     block_size: int = 256,
     overview_level: int = 4,
     external_overviews: bool = False,
+    band_statistics: Sequence[dict[str, Any]] | None = None,
 ) -> None:
     """
     Write a Cloud Optimized GeoTIFF (COG) from an xarray DataArray.
 
-    Embeds band-level statistics, then converts to a COG with internal
-    overviews via ``rio-cogeo``. External ``.ovr`` sidecars are off by
-    default (COG internal overviews are enough for TiTiler / STAC Browser);
-    pass ``external_overviews=True`` if a workflow still needs them.
+    Builds an in-memory GeoTIFF, embeds band statistics tags, then converts to a
+    COG with internal overviews via ``rio-cogeo`` (single disk write of the final
+    COG). External ``.ovr`` sidecars are off by default; pass
+    ``external_overviews=True`` if a workflow still needs them.
 
     Args:
         cog_path: Path where the final COG will be saved as a GeoTIFF file.
@@ -43,15 +81,18 @@ def write_cog(
         external_overviews: If True, also builds external ``.ovr`` files with
             ``gdaladdo`` (extra preprocess cost; not required for COG readers).
             Defaults to False.
+        band_statistics: Optional per-band statistics dicts (index-aligned with
+            bands). When provided, avoids a second full-array stats pass.
+            Expected keys match GDAL ``STATISTICS_*`` tags.
 
     Notes:
-        - Band-level statistics (minimum, maximum, mean, standard deviation)
-          are embedded within the output COG using rasterio.
+        - Band-level statistics (minimum, maximum, mean, standard deviation,
+          valid percent) are embedded as band tags when available.
 
         - ``external_overviews=True`` requires GDAL (``gdaladdo``) on PATH.
     """
-    profile = cog_profiles.get("deflate")
-    profile.update(
+    dst_profile = cog_profiles.get("deflate")
+    dst_profile.update(
         {
             "compress": compress,
             "blockxsize": block_size,
@@ -59,48 +100,39 @@ def write_cog(
         }
     )
 
-    # Create tmp file to add stats to using rasterio (requires an actual file
-    # won't work with memfile)
-    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
+    data, count, height, width = _dataarray_to_raster_array(da)
+    src_profile = {
+        "driver": "GTiff",
+        "dtype": data.dtype,
+        "count": count,
+        "height": height,
+        "width": width,
+        "crs": da.rio.crs,
+        "transform": da.rio.transform(),
+        "nodata": da.rio.nodata,
+    }
 
-    try:
-        da.rio.to_raster(tmp_path, driver="GTiff", compress=compress)
+    # Prefer caller-supplied stats (already computed for STAC); otherwise derive
+    # once from the in-memory array so COG tags stay populated.
+    if band_statistics is None:
+        band_statistics = [get_array_statistics(data[i]) for i in range(count)]
 
-        # Embed band-level statistics using rasterio
-        with rasterio.open(tmp_path, "r+") as src:
-            for i in range(1, src.count + 1):
-                data = src.read(i, masked=True)
-                stats_dict = {
-                    "STATISTICS_MINIMUM": float(np.nanmin(data)),
-                    "STATISTICS_MAXIMUM": float(np.nanmax(data)),
-                    "STATISTICS_MEAN": float(np.nanmean(data)),
-                    "STATISTICS_STDDEV": float(np.nanstd(data)),
-                }
-                src.update_tags(i, **stats_dict)
+    with MemoryFile() as memfile:
+        with memfile.open(**src_profile) as mem:
+            mem.write(data)
+            for i in range(1, count + 1):
+                tags = _band_stat_tags(
+                    band_statistics[i - 1] if i - 1 < len(band_statistics) else None
+                )
+                if tags:
+                    mem.update_tags(i, **tags)
 
-        # Optional external overviews on the temp GeoTIFF (moved after COG write).
-        if external_overviews:
-            subprocess.run(
-                [
-                    "gdaladdo",
-                    "-q",
-                    "-ro",
-                    str(tmp_path),
-                    "2",
-                    "4",
-                    "8",
-                    "16",
-                ],
-                check=True,
-            )
-
-        # Use rio-cogeo to convert to COG with internal overviews
-        with rasterio.open(tmp_path) as src:
+        # Re-open read-only for cog_translate (write-mode datasets are deprecated).
+        with memfile.open() as mem:
             cog_translate(
-                source=src,
+                source=mem,
                 dst_path=cog_path,
-                dst_kwargs=profile,
+                dst_kwargs=dst_profile,
                 overview_level=overview_level,
                 overview_resampling="average",
                 forward_band_tags=True,
@@ -108,10 +140,17 @@ def write_cog(
                 quiet=True,
             )
 
-        if external_overviews:
-            tmp_ovr_path = tmp_path.with_suffix(".tif.ovr")
-            cog_ovr_path = cog_path.with_suffix(".tif.ovr")
-            if tmp_ovr_path.exists():
-                shutil.move(tmp_ovr_path, cog_ovr_path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    if external_overviews:
+        subprocess.run(
+            [
+                "gdaladdo",
+                "-q",
+                "-ro",
+                str(cog_path),
+                "2",
+                "4",
+                "8",
+                "16",
+            ],
+            check=True,
+        )

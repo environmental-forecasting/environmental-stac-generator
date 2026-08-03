@@ -213,6 +213,47 @@ def format_time(datetime: dt, utc: bool=True, with_seconds: bool=True) -> str:
     return result + "Z" if utc else result
 
 
+def get_array_statistics(values: np.ndarray) -> dict:
+    """
+    Compute GDAL-style statistics for a NumPy array in a single pass.
+
+    Valid pixels are finite values (not NaN/Inf). Empty or all-invalid arrays
+    return ``None`` for min/max/mean/stddev.
+    """
+    arr = np.asarray(values)
+    total_pixels = arr.size
+    if total_pixels == 0:
+        return {
+            "STATISTICS_MINIMUM": None,
+            "STATISTICS_MAXIMUM": None,
+            "STATISTICS_MEAN": None,
+            "STATISTICS_STDDEV": None,
+            "STATISTICS_VALID_PERCENT": 0.0,
+        }
+
+    finite = np.isfinite(arr)
+    valid_pixels = int(finite.sum())
+    band_valid_percent = math.floor((100.0 * valid_pixels / total_pixels) * 100) / 100
+
+    if valid_pixels == 0:
+        return {
+            "STATISTICS_MINIMUM": None,
+            "STATISTICS_MAXIMUM": None,
+            "STATISTICS_MEAN": None,
+            "STATISTICS_STDDEV": None,
+            "STATISTICS_VALID_PERCENT": band_valid_percent,
+        }
+
+    valid = arr[finite]
+    return {
+        "STATISTICS_MINIMUM": float(valid.min()),
+        "STATISTICS_MAXIMUM": float(valid.max()),
+        "STATISTICS_MEAN": float(valid.mean()),
+        "STATISTICS_STDDEV": float(valid.std()),
+        "STATISTICS_VALID_PERCENT": band_valid_percent,
+    }
+
+
 def get_da_statistics(da: xr.DataArray) -> dict:
     """
     Compute statistics for a given xr.DataArray.
@@ -240,26 +281,7 @@ def get_da_statistics(da: xr.DataArray) -> dict:
         - When the DataArray is empty, all statistics except `STATISTICS_VALID_PERCENT`
           will be set to `None`.
     """
-    # Compute variable statistics
-    valid_mask = np.isfinite(da.values)
-    valid_pixels = valid_mask.sum()
-    total_pixels = da.size
-    band_min = float(da.min(skipna=True).item()) if da.size > 0 else None
-    band_max = float(da.max(skipna=True).item()) if da.size > 0 else None
-    band_mean = float(da.mean(skipna=True).item()) if da.size > 0 else None
-    band_stddev = float(da.std(skipna=True).item()) if da.size > 0 else None
-    band_valid_percent = float(100.0 * valid_pixels / total_pixels)
-    # Round to 2dp
-    band_valid_percent = math.floor(band_valid_percent * 100) / 100
-
-    return {
-        "STATISTICS_MINIMUM": band_min,
-        "STATISTICS_MAXIMUM": band_max,
-        "STATISTICS_MEAN": band_mean,
-        "STATISTICS_STDDEV": band_stddev,
-        # What percent of the pixels in a band are valid (i.e., non-NaN / non-nodata)
-        "STATISTICS_VALID_PERCENT": band_valid_percent,
-    }
+    return get_array_statistics(da.values)
 
 
 def is_jsonable(x):

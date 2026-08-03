@@ -846,6 +846,7 @@ class STACGenerator(BaseSTAC):
         da_list = []
         band_names = valid_bands
         band_metadata = []
+        band_statistics: list[dict] = []
         for bidx, var_name in enumerate(band_names, start=1):
             da_variable = ds_leadtime_slice[var_name]
             da_variable.rio.write_crs(crs, inplace=True)
@@ -863,6 +864,7 @@ class STACGenerator(BaseSTAC):
             if not reproject:
                 stats = get_da_statistics(da_variable)
                 metadata |= stats
+                band_statistics.append(stats)
             band_metadata.append(metadata)
 
         if not stac_only:
@@ -883,6 +885,7 @@ class STACGenerator(BaseSTAC):
                     cog_file,
                     compress_method,
                     reproject=reproject,
+                    band_statistics=band_statistics or None,
                 )
 
             # Create thumbnail plot for only the first variable for the first leadtime
@@ -976,6 +979,7 @@ class STACGenerator(BaseSTAC):
         cog_file: Path,
         compress_method: str,
         reproject: bool = False,
+        band_statistics: list[dict] | None = None,
     ):
         """
         Write a multiband DataArray as a Cloud Optimized GeoTIFF (COG).
@@ -989,6 +993,8 @@ class STACGenerator(BaseSTAC):
             compress_method: COG compression method (e.g. ``DEFLATE`` or ``NONE``).
             reproject: Whether to reproject to EPSG:4326.
                 Defaults to False.
+            band_statistics: Optional per-band statistics already computed for
+                STAC metadata; reused as COG band tags to avoid a second pass.
         """
         # Add metadata to extracted variable so `to_raster` includes them in the output
         # GeoTIFF
@@ -996,7 +1002,14 @@ class STACGenerator(BaseSTAC):
         da_multiband.rio.set_spatial_dims(x_dim=x_coord, y_dim=y_coord, inplace=True)
         if reproject:
             da_multiband = da_multiband.rio.reproject("EPSG:4326", inplace=False)
-        write_cog(cog_file, da_multiband, compress=compress_method)
+            # Stats from the source grid no longer apply after reprojection.
+            band_statistics = None
+        write_cog(
+            cog_file,
+            da_multiband,
+            compress=compress_method,
+            band_statistics=band_statistics,
+        )
 
     @staticmethod
     def _create_and_write_thumbnail(

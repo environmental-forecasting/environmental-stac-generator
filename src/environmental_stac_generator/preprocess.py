@@ -74,14 +74,17 @@ def main(
 
     stac_generator = STACGenerator()
 
-    for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):  # type: ignore
-        pbar.set_description(f"Processing {nc_file}")
-        stac_generator.process(
-            nc_file=nc_file,
-            name=name,
-            compress=compress,
-            overwrite=overwrite,
-            forecast_frequency=forecast_frequency,
-            stac_only=stac_only,
-            workers=workers,
-        )
+    try:
+        for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):  # type: ignore
+            pbar.set_description(f"Processing {nc_file}")
+            stac_generator.process(
+                nc_file=nc_file,
+                name=name,
+                compress=compress,
+                overwrite=overwrite,
+                forecast_frequency=forecast_frequency,
+                stac_only=stac_only,
+                workers=workers,
+            )
+    finally:
+        stac_generator.close_executor()

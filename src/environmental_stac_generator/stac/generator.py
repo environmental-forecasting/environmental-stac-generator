@@ -360,6 +360,26 @@ class BaseSTAC:
 
 
 class STACGenerator(BaseSTAC):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._executor: ProcessPoolExecutor | None = None
+        self._executor_workers: int | None = None
+
+    def _get_executor(self, workers: int) -> ProcessPoolExecutor:
+        """Return a reusable process pool, recreating it if worker count changes."""
+        if self._executor is None or self._executor_workers != workers:
+            self.close_executor()
+            self._executor = ProcessPoolExecutor(max_workers=workers)
+            self._executor_workers = workers
+        return self._executor
+
+    def close_executor(self) -> None:
+        """Shut down the reusable process pool if it is running."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+            self._executor_workers = None
+
     def _set_out_paths(self) -> None:
         """
         Set output directories for netCDF files, COGs, and configuration data.
@@ -461,52 +481,66 @@ class STACGenerator(BaseSTAC):
                 - leadtime_coords (xr.DataArray): Leadtime coordinates from dataset.
         """
         with xr.open_dataset(nc_file, decode_coords="all") as ds:
-            # Determine spatial coordinates
-            x_coord = find_coord(ds, ["xc", "x", "lon", "longitude"])
-            y_coord = find_coord(ds, ["yc", "y", "lat", "latitude"])
+            info, _ = self._forecast_info_from_dataset(ds)
+            return info
 
-            # Get time-related coordinate information
-            time_coords: xr.DataArray = ds.coords.get(
-                "time", ds.coords.get("forecast_time")
-            )
-            leadtime_coords: xr.DataArray = ds.coords.get(
-                "leadtime", ds.coords.get("lead_time")
-            )
+    def _forecast_info_from_dataset(
+        self, ds: xr.Dataset
+    ) -> tuple[tuple, xr.Dataset]:
+        """
+        Extract forecast metadata from an already-open dataset.
 
-            if x_coord is None or y_coord is None:
-                raise ValueError("Spatial coordinates not found in dataset")
+        Returns:
+            A pair of ``(info_tuple, ds)`` where ``info_tuple`` matches
+            ``get_forecast_info`` and ``ds`` has km→m unit conversion applied.
+        """
+        # Determine spatial coordinates
+        x_coord = find_coord(ds, ["xc", "x", "lon", "longitude"])
+        y_coord = find_coord(ds, ["yc", "y", "lat", "latitude"])
 
-            # Convert km to m if needed
-            ds = self._convert_units(ds, x_coord, y_coord)
+        # Get time-related coordinate information
+        time_coords: xr.DataArray = ds.coords.get(
+            "time", ds.coords.get("forecast_time")
+        )
+        leadtime_coords: xr.DataArray = ds.coords.get(
+            "leadtime", ds.coords.get("lead_time")
+        )
 
-            # Filter 4D variables - these are variables of interest for COGs
-            # Assuming other vars shouldn't be converted to COGs
-            valid_bands = [var for var in ds.data_vars if len(ds[var].dims) == 4]
+        if x_coord is None or y_coord is None:
+            raise ValueError("Spatial coordinates not found in dataset")
 
-            # Get attributes from NetCDF file
-            nc_attrs = ds.attrs
-            crs = nc_attrs["geospatial_bounds_crs"]
-            ds.rio.write_crs(crs, inplace=True)
+        # Convert km to m if needed
+        ds = self._convert_units(ds, x_coord, y_coord)
 
-            # Get bounding box of dataset (in expected "EPSG:4326")
-            bbox, geometry = self._get_bbox_and_geometry(ds, x_coord, y_coord, crs)
+        # Filter 4D variables - these are variables of interest for COGs
+        # Assuming other vars shouldn't be converted to COGs
+        valid_bands = [var for var in ds.data_vars if len(ds[var].dims) == 4]
 
-            # Get temporal bounds from input netCDF
-            time_coords_start = pd.to_datetime(time_coords.isel(time=0).values)
-            time_coords_end = pd.to_datetime(time_coords.isel(time=-1).values)
+        # Get attributes from NetCDF file
+        nc_attrs = ds.attrs
+        crs = nc_attrs["geospatial_bounds_crs"]
+        ds.rio.write_crs(crs, inplace=True)
 
-            return (
-                crs,
-                bbox,
-                geometry,
-                valid_bands,
-                x_coord,
-                y_coord,
-                time_coords,
-                time_coords_start,
-                time_coords_end,
-                leadtime_coords,
-            )
+        # Get bounding box of dataset (in expected "EPSG:4326")
+        bbox, geometry = self._get_bbox_and_geometry(ds, x_coord, y_coord, crs)
+
+        # Get temporal bounds from input netCDF
+        time_coords_start = pd.to_datetime(time_coords.isel(time=0).values)
+        time_coords_end = pd.to_datetime(time_coords.isel(time=-1).values)
+
+        info = (
+            crs,
+            bbox,
+            geometry,
+            valid_bands,
+            x_coord,
+            y_coord,
+            time_coords,
+            time_coords_start,
+            time_coords_end,
+            leadtime_coords,
+        )
+        return info, ds
 
     def _convert_units(self, ds: xr.Dataset, x_coord: str, y_coord: str) -> xr.Dataset:
         """
@@ -609,37 +643,38 @@ class STACGenerator(BaseSTAC):
 
         catalog = self.catalog
 
-        # Get required coords and metadata from forecast netCDF file
-        (
-            crs,
-            bbox,
-            geometry,
-            valid_bands,
-            x_coord,
-            y_coord,
-            time_coords,
-            time_coords_start,
-            time_coords_end,
-            leadtime_coords,
-        ) = self.get_forecast_info(nc_file)
-        nleadtime = len(leadtime_coords)
-
-        # Create (or retrieve) highest level collection (model name) within the catalog
-        collection = self.get_or_create_collection(
-            parent=catalog,
-            collection_id=name,
-            title=f"{name}",
-            description=f"{name.capitalize().replace("_", " ").replace("-", " ")} collection",
-            bbox=bbox,
-            extra_fields = {"custom:hemisphere": hemisphere} if hemisphere else None,
-            license=self._license,
-            temporal_extent=[time_coords_start, time_coords_end],
-        )
-
+        # Open once: metadata extraction and COG/netCDF writing share this handle
         ds = xr.open_dataset(nc_file, decode_coords="all")
         try:
-            # Convert km to m if needed
-            ds = self._convert_units(ds, x_coord, y_coord)
+            (
+                (
+                    crs,
+                    bbox,
+                    geometry,
+                    valid_bands,
+                    x_coord,
+                    y_coord,
+                    time_coords,
+                    time_coords_start,
+                    time_coords_end,
+                    leadtime_coords,
+                ),
+                ds,
+            ) = self._forecast_info_from_dataset(ds)
+            nleadtime = len(leadtime_coords)
+
+            # Create (or retrieve) highest level collection (model name) within the catalog
+            collection = self.get_or_create_collection(
+                parent=catalog,
+                collection_id=name,
+                title=f"{name}",
+                description=f"{name.capitalize().replace("_", " ").replace("-", " ")} collection",
+                bbox=bbox,
+                extra_fields = {"custom:hemisphere": hemisphere} if hemisphere else None,
+                license=self._license,
+                temporal_extent=[time_coords_start, time_coords_end],
+            )
+
             for time_idx, time_val in enumerate(time_coords):
                 ds_time_slice = ds.sel(time=time_val)
 
@@ -720,8 +755,8 @@ class STACGenerator(BaseSTAC):
                 nc_asset = add_file_info_to_asset(nc_asset, nc_asset.href)
 
                 # Load the forecast-init slice once, then hand each worker only its
-                # leadtime (deep copy) so pickling stays small and does not send the
-                # full leadtime stack to every process.
+                # leadtime. `.load()` materialises that slice so pickling stays small
+                # without an extra deep copy of the xarray structure.
                 ds_time_slice = ds_time_slice.load()
                 common_args = (
                     forecast_reference_time,
@@ -738,38 +773,37 @@ class STACGenerator(BaseSTAC):
                     self._compress_method,
                 )
 
-                # Process each leadtime. Use a staticmethod so ProcessPoolExecutor
-                # does not pickle this STACGenerator / Catalog (which mutates as
-                # assets are added and caused "dictionary changed size during iteration").
-                with ProcessPoolExecutor(max_workers=workers) as executor:
-                    with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
-                        futures = []
-                        for i in range(nleadtime):
-                            ds_leadtime_slice = ds_time_slice.isel(
-                                leadtime=i
-                            ).copy(deep=True)
-                            future = executor.submit(
-                                STACGenerator._process_leadtime,
-                                i,
-                                ds_leadtime_slice,
-                                *common_args,
-                            )
-                            future.add_done_callback(lambda _: pbar.update(1))
-                            futures.append(future)
+                # Reuse a process pool across files/inits. Use a staticmethod so
+                # ProcessPoolExecutor does not pickle this STACGenerator / Catalog
+                # (which mutates as assets are added and caused "dictionary changed
+                # size during iteration").
+                executor = self._get_executor(workers)
+                with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
+                    futures = []
+                    for i in range(nleadtime):
+                        ds_leadtime_slice = ds_time_slice.isel(leadtime=i).load()
+                        future = executor.submit(
+                            STACGenerator._process_leadtime,
+                            i,
+                            ds_leadtime_slice,
+                            *common_args,
+                        )
+                        future.add_done_callback(lambda _: pbar.update(1))
+                        futures.append(future)
 
-                        # Wait for all futures to complete
-                        for future in futures:
-                            i, cog_file, assets, pbar_description = future.result()
-                            pbar.set_description(pbar_description)
-                            for asset in assets:
-                                item.add_asset(key=asset["key"], asset=asset["asset"])
-                                add_file_info_to_asset(asset["asset"], asset["asset"].href)
-                                # Use the first thumbnail generated for this item as the
-                                # thumbnail for the collection as well.
-                                if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
-                                    # Skip if the collection already has a thumbnail asset
-                                    if not collection.get_assets(role="thumbnail"):
-                                        collection.add_asset(key=asset["key"], asset=asset["asset"])
+                    # Wait for all futures to complete
+                    for future in futures:
+                        i, cog_file, assets, pbar_description = future.result()
+                        pbar.set_description(pbar_description)
+                        for asset in assets:
+                            item.add_asset(key=asset["key"], asset=asset["asset"])
+                            add_file_info_to_asset(asset["asset"], asset["asset"].href)
+                            # Use the first thumbnail generated for this item as the
+                            # thumbnail for the collection as well.
+                            if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
+                                # Skip if the collection already has a thumbnail asset
+                                if not collection.get_assets(role="thumbnail"):
+                                    collection.add_asset(key=asset["key"], asset=asset["asset"])
         finally:
             ds.close()
 

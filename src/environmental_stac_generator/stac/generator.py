@@ -627,6 +627,8 @@ class STACGenerator(BaseSTAC):
         Processes the input netCDF file to extract metadata, create STAC Items
         representing each forecast leadtime, and generate associated COG assets.
         Creates a STAC structure with collections for model name and forecast date.
+        Does not write the catalog to disk; call ``save_catalog()`` after a batch
+        of files (see ``preprocess.main``).
 
         Args:
             nc_file: Path to the input netCDF file.
@@ -826,9 +828,6 @@ class STACGenerator(BaseSTAC):
                     add_file_info_to_asset(nc_asset, nc_asset.href)
         finally:
             ds.close()
-
-        # Save catalog and collections
-        self.save_catalog()
 
 
     @staticmethod

@@ -87,4 +87,9 @@ def main(
                 workers=workers,
             )
     finally:
-        stac_generator.close_executor()
+        # Persist once after the batch (not per file) to avoid O(N^2) catalog I/O.
+        # Still run on failure so partial progress from earlier files is kept.
+        try:
+            stac_generator.save_catalog()
+        finally:
+            stac_generator.close_executor()

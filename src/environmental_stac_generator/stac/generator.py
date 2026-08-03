@@ -396,8 +396,9 @@ class STACGenerator(BaseSTAC):
         Write or validate configuration data for STAC generation.
 
         If a configuration file already exists for this collection, validates
-        that the new configuration matches the existing one. Otherwise, creates
-        the file and stores the provided configuration.
+        that the new configuration matches the existing one. If the file exists
+        but this collection is new, merges the new collection into the file.
+        Otherwise, creates the file and stores the provided configuration.
 
         Args:
             config_data: Dictionary containing processing parameters to store.
@@ -409,19 +410,27 @@ class STACGenerator(BaseSTAC):
         if config_output_path.exists():
             with open(config_output_path, "rb") as f:
                 current_config_data = orjson.loads(f.read())
-                if collection_name in current_config_data:
-                    diff = DeepDiff(
-                        config_data[collection_name],
-                        current_config_data[collection_name],
+            if collection_name in current_config_data:
+                diff = DeepDiff(
+                    config_data[collection_name],
+                    current_config_data[collection_name],
+                )
+                if diff:
+                    logger.error(
+                        "You are attempting to generate collection "
+                        f"({collection_name}) with different options to "
+                        "previous! Run with old values (below) to continue!"
                     )
-                    if diff:
-                        logger.error(
-                            "You are attempting to generate collection "
-                            f"({collection_name}) with different options to "
-                            "previous! Run with old values (below) to continue!"
-                        )
-                        logger.error(current_config_data[collection_name])
-                        raise ConfigMismatchError("Config does not match previous run.")
+                    logger.error(current_config_data[collection_name])
+                    raise ConfigMismatchError("Config does not match previous run.")
+                return
+
+            # New collection in an existing config file: merge and write
+            current_config_data.update(config_data)
+            with open(config_output_path, "wb") as f:
+                f.write(
+                    orjson.dumps(current_config_data, option=orjson.OPT_INDENT_2)
+                )
         else:
             config_output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_output_path, "wb") as f:
@@ -885,14 +894,20 @@ class STACGenerator(BaseSTAC):
                         forecast_reference_time,
                         valid_time,
                     )
+
+            with rasterio.open(cog_file) as src:
+                width = src.width
+                height = src.height
+                transform = list(src.transform)[:6]
+                epsg_code = src.crs.to_epsg()
         else:
             pbar_description = f"Processing STAC: {item_id_cog}"
-
-        with rasterio.open(cog_file) as src:
-            width = src.width
-            height = src.height
-            transform = list(src.transform)[:6]
-            epsg_code = src.crs.to_epsg()
+            # Derive projection metadata from the in-memory array when no COG is written
+            da_ref = da_list[0]
+            width = int(da_ref.rio.width)
+            height = int(da_ref.rio.height)
+            transform = list(da_ref.rio.transform())[:6]
+            epsg_code = da_ref.rio.crs.to_epsg() if da_ref.rio.crs else None
 
         assets = []
         # Add COG asset to item
@@ -916,9 +931,8 @@ class STACGenerator(BaseSTAC):
         )
         assets.append(cog_asset)
 
-        # Create a thumbnail plot of the first variable for the first leadtime
-        if i == 0:
-            # Add thumbnail asset to item
+        # Thumbnail asset only when we wrote (or expect) a thumbnail file
+        if i == 0 and not stac_only:
             # Some STAC tools may only show the first thumbnail asset
             thumbnail_asset = dict(
                 key="thumbnail",

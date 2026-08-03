@@ -1,5 +1,6 @@
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 
 import numpy as np
 import orjson
@@ -72,8 +73,7 @@ def test_store_config_new_file(stac, tmp_path):
     Test that `STACGenerator._store_config` creates a new config file when it doesn't exist.
 
     Verifies that the method properly writes configuration data to a new JSON file
-    when the target file does not already exist. Uses mocks for
-    file system operations and checks that the correct content is written.
+    when the target file does not already exist.
 
     Args:
         stac: STAC generator instance with test configuration
@@ -85,18 +85,10 @@ def test_store_config_new_file(stac, tmp_path):
     stac._config_output_path = tmp_path / "config.json"
     config = {stac._collection_name: {"forecast_frequency": "1days"}}
 
-    # Mock writing to a config file that does not exist
-    m = mock_open()
-    with (
-        patch("builtins.open", m),
-        patch("pathlib.Path.exists", return_value=False),
-    ):
-        stac._store_config(config)
+    stac._store_config(config)
 
-    handle = m()
-    handle.write.assert_called_once()
-    written = handle.write.call_args[0][0]
-    assert orjson.loads(written)[stac._collection_name]["forecast_frequency"] == "1days"
+    written = orjson.loads(stac._config_output_path.read_bytes())
+    assert written[stac._collection_name]["forecast_frequency"] == "1days"
 
 
 def test_store_config_existing_mismatch(stac, tmp_path):
@@ -104,8 +96,7 @@ def test_store_config_existing_mismatch(stac, tmp_path):
     Test that `STACGenerator._store_config` raises `ConfigMismatchError` when existing config doesn't match.
 
     Verifies that the method correctly identifies a mismatch between an existing configuration file
-    and the new configuration being written. This scenario occurs when the collection name or
-    configuration content in the existing file differs from what is attempted to be stored.
+    and the new configuration being written.
 
     Args:
         stac: STAC generator instance with test configuration
@@ -116,21 +107,45 @@ def test_store_config_existing_mismatch(stac, tmp_path):
     """
     stac._collection_name = "test_collection"
     stac._config_output_path = tmp_path / "config.json"
-    config = {stac._collection_name: {"forecast_frequency": "1days"}}
-
-    # Mocking an existing config file being run with forecast freq of 2 days
     existing_config = {stac._collection_name: {"forecast_frequency": "2days"}}
-    mock_open_read = mock_open(read_data=orjson.dumps(existing_config))
+    stac._config_output_path.write_bytes(orjson.dumps(existing_config))
 
-    with (
-        patch("builtins.open", mock_open_read),
-        patch("pathlib.Path.exists", return_value=True),
-        pytest.raises(ConfigMismatchError),
-    ):
-        # Since the existing config and the new one don't match,
-        # it should raise an error upon trying to validation
-        # and store the updated config
+    config = {stac._collection_name: {"forecast_frequency": "1days"}}
+    with pytest.raises(ConfigMismatchError):
         stac._store_config(config)
+
+
+def test_store_config_merge_new_collection(stac, tmp_path):
+    """
+    Test that `_store_config` merges a new collection into an existing config.json.
+    """
+    stac._config_output_path = tmp_path / "config.json"
+    existing = {"existing_collection": {"forecast_frequency": "1days"}}
+    stac._config_output_path.write_bytes(
+        orjson.dumps(existing, option=orjson.OPT_INDENT_2)
+    )
+
+    stac._collection_name = "new_collection"
+    config = {"new_collection": {"forecast_frequency": "6hours"}}
+    stac._store_config(config)
+
+    written = orjson.loads(stac._config_output_path.read_bytes())
+    assert written["existing_collection"]["forecast_frequency"] == "1days"
+    assert written["new_collection"]["forecast_frequency"] == "6hours"
+
+
+def test_store_config_existing_match_noop(stac, tmp_path):
+    """
+    Matching config for an existing collection should not rewrite the file.
+    """
+    stac._collection_name = "test_collection"
+    stac._config_output_path = tmp_path / "config.json"
+    existing = {stac._collection_name: {"forecast_frequency": "1days"}}
+    payload = orjson.dumps(existing, option=orjson.OPT_INDENT_2)
+    stac._config_output_path.write_bytes(payload)
+
+    stac._store_config(existing)
+    assert stac._config_output_path.read_bytes() == payload
 
 
 def test_convert_units_km(stac):
@@ -281,3 +296,44 @@ def test_get_forecast_info(stac, sample_sic_ds):
     assert crs == "EPSG:6931", "`crs` should be 'EPSG:6931'"
     for band in ["sic_mean", "sic_stddev"]:
         assert band in valid_bands, f"'{band}' should be in `valid_bands`"
+
+
+def test_process_leadtime_stac_only_without_cog(tmp_path):
+    """
+    `stac_only=True` should build assets from in-memory data without opening a COG.
+    """
+    ny, nx = 4, 5
+    xc = np.linspace(-1000, 1000, nx)
+    yc = np.linspace(-1000, 1000, ny)
+    ds = xr.Dataset(
+        {
+            "sic_mean": (("yc", "xc"), np.random.rand(ny, nx)),
+            "sic_stddev": (("yc", "xc"), np.random.rand(ny, nx)),
+        },
+        coords={"xc": xc, "yc": yc},
+    )
+
+    _, cog_file, assets, _ = STACGenerator._process_leadtime(
+        i=0,
+        ds_leadtime_slice=ds,
+        forecast_reference_time=datetime(2025, 1, 1),
+        leadtime_unit="days",
+        leadtime_step=1,
+        x_coord="xc",
+        y_coord="yc",
+        crs="EPSG:6931",
+        cog_dir=tmp_path,
+        stac_only=True,
+        item_id="forecast_init_2025-01-01",
+        valid_bands=["sic_mean", "sic_stddev"],
+        overwrite=False,
+        compress_method="DEFLATE",
+    )
+
+    assert not cog_file.exists()
+    assert len(assets) == 1
+    assert assets[0]["key"] != "thumbnail"
+    extra = assets[0]["asset"].extra_fields
+    assert extra["proj:shape"] == [ny, nx]
+    assert extra["proj:epsg"] == 6931
+    assert len(extra["proj:transform"]) == 6

@@ -55,7 +55,7 @@ def preprocess(
         False, "-o", "--overwrite", help="Overwrite existing COGs"
     ),
     no_compress: bool = typer.Option(
-        True,
+        False,
         "-c",
         "--no-compress",
         help="Disable COG compression (default is compressed)",
@@ -74,7 +74,7 @@ def preprocess(
         name=name,
         workers=workers,
         overwrite=overwrite,
-        no_compress=no_compress,
+        compress=not no_compress,
         stac_only=stac_only,
     )
 

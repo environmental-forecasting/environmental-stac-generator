@@ -18,7 +18,7 @@ def main(
     name: str,
     workers: int,
     overwrite: bool,
-    no_compress: bool,
+    compress: bool,
     stac_only: bool,
 ):
     """
@@ -34,7 +34,7 @@ def main(
         name: Collection name.
         workers: Max number of concurrent workers.
         overwrite: Whether to overwrite existing COG files.
-        no_compress: Disable COG compression.
+        compress: Whether to compress COG output.
         stac_only: Output only the STAC files.
 
     Raises:
@@ -79,7 +79,7 @@ def main(
         stac_generator.process(
             nc_file=nc_file,
             name=name,
-            compress=no_compress,
+            compress=compress,
             overwrite=overwrite,
             forecast_frequency=forecast_frequency,
             stac_only=stac_only,

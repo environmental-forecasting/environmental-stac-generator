@@ -47,6 +47,35 @@ def flatten_list(lst):
     ]
 
 
+def hemisphere_from_dataset(ds: xr.Dataset) -> str:
+    """
+    Get the hemisphere ("north" or "south") from dataset geospatial attributes.
+
+    Args:
+        ds: Dataset with a ``geospatial_lat_min`` attribute when available.
+
+    Returns:
+        ``"north"``, ``"south"``, or ``""`` if the attribute is missing.
+
+    Raises:
+        ValueError: If the minimum latitude value is not within -90 to 90.
+    """
+    lat_min = ds.attrs.get("geospatial_lat_min", None)
+
+    if lat_min is None:
+        logger.warning(
+            "netCDF does not contain `geospatial_lat_min`, "
+            "cannot determine hemisphere"
+        )
+        return ""
+
+    if 0 <= lat_min <= 90:
+        return "north"
+    if -90 <= lat_min < 0:
+        return "south"
+    raise ValueError(f"Unexpected minimum latitude value: {lat_min}")
+
+
 def get_hemisphere(netcdf_file: Path) -> str:
     """
     Get the hemisphere (either "north" or "south") of the given netCDF file based on its minimum latitude value.
@@ -69,20 +98,7 @@ def get_hemisphere(netcdf_file: Path) -> str:
         'south'
     """
     with xr.open_dataset(netcdf_file) as ds:
-        # Extract the minimum latitude value from the dataset's attributes
-        lat_min = ds.attrs.get("geospatial_lat_min", None)
-
-        if lat_min is None:
-            logger.warning("netCDF does not contain `geospatial_lat_min`, "
-                        "cannot determine hemisphere")
-            return ""
-
-        if 0 <= lat_min <= 90:
-            return "north"
-        elif -90 <= lat_min < 0:
-            return "south"
-        else:
-            raise ValueError(f"Unexpected minimum latitude value: {lat_min}")
+        return hemisphere_from_dataset(ds)
 
 
 def get_nc_files(location: str | Path, extension="nc") -> list[Path] | Path | None:

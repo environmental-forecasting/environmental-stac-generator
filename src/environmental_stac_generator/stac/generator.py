@@ -1,6 +1,6 @@
 import logging
 from abc import abstractmethod
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -26,8 +26,8 @@ from ..utils import (
     find_coord,
     format_time,
     get_da_statistics,
-    get_hemisphere,
     get_nc_attributes,
+    hemisphere_from_dataset,
     parse_forecast_frequency,
     proj_to_geo,
 )
@@ -364,21 +364,36 @@ class STACGenerator(BaseSTAC):
         super().__init__(*args, **kwargs)
         self._executor: ProcessPoolExecutor | None = None
         self._executor_workers: int | None = None
+        self._io_executor: ThreadPoolExecutor | None = None
 
     def _get_executor(self, workers: int) -> ProcessPoolExecutor:
         """Return a reusable process pool, recreating it if worker count changes."""
         if self._executor is None or self._executor_workers != workers:
-            self.close_executor()
+            if self._executor is not None:
+                self._executor.shutdown(wait=True)
+                self._executor = None
+                self._executor_workers = None
             self._executor = ProcessPoolExecutor(max_workers=workers)
             self._executor_workers = workers
         return self._executor
 
+    def _get_io_executor(self) -> ThreadPoolExecutor:
+        """Return a reusable thread pool for overlapping netCDF I/O with COG work."""
+        if self._io_executor is None:
+            self._io_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="envstac-io"
+            )
+        return self._io_executor
+
     def close_executor(self) -> None:
-        """Shut down the reusable process pool if it is running."""
+        """Shut down reusable process/IO pools if they are running."""
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor = None
             self._executor_workers = None
+        if self._io_executor is not None:
+            self._io_executor.shutdown(wait=True)
+            self._io_executor = None
 
     def _set_out_paths(self) -> None:
         """
@@ -631,7 +646,6 @@ class STACGenerator(BaseSTAC):
         self._forecast_frequency = forecast_frequency
         self._compress_method = "DEFLATE" if compress else "NONE"
         nc_file = Path(nc_file).resolve()
-        hemisphere = get_hemisphere(nc_file)
 
         # Initialise output paths
         self._set_out_paths()
@@ -643,9 +657,10 @@ class STACGenerator(BaseSTAC):
 
         catalog = self.catalog
 
-        # Open once: metadata extraction and COG/netCDF writing share this handle
+        # Open once: metadata, hemisphere, and COG/netCDF writing share this handle
         ds = xr.open_dataset(nc_file, decode_coords="all")
         try:
+            hemisphere = hemisphere_from_dataset(ds)
             (
                 (
                     crs,
@@ -706,10 +721,15 @@ class STACGenerator(BaseSTAC):
                 # Save the forecast init slice as a netcdf file
                 out_nc_file = ncdf_dir / f"{forecast_reference_time_filesafe}.nc"
 
-                # Write the netCDF file in addition to the STAC json output
-                if not stac_only:
-                    self._write_netcdf(ds_time_slice, out_nc_file)
+                # Materialise once for netCDF write + leadtime workers
+                ds_time_slice = ds_time_slice.load()
 
+                # Overlap sliced-netCDF write with leadtime COG generation
+                nc_write_future = None
+                if not stac_only:
+                    nc_write_future = self._get_io_executor().submit(
+                        self._write_netcdf, ds_time_slice, out_nc_file
+                    )
 
                 properties={
                     "forecast:reference_time": forecast_reference_time_str,
@@ -752,12 +772,7 @@ class STACGenerator(BaseSTAC):
                     )
 
                 item.add_asset(key="netcdf", asset=nc_asset)
-                nc_asset = add_file_info_to_asset(nc_asset, nc_asset.href)
 
-                # Load the forecast-init slice once, then hand each worker only its
-                # leadtime. `.load()` materialises that slice so pickling stays small
-                # without an extra deep copy of the xarray structure.
-                ds_time_slice = ds_time_slice.load()
                 common_args = (
                     forecast_reference_time,
                     leadtime_unit,
@@ -804,6 +819,11 @@ class STACGenerator(BaseSTAC):
                                 # Skip if the collection already has a thumbnail asset
                                 if not collection.get_assets(role="thumbnail"):
                                     collection.add_asset(key=asset["key"], asset=asset["asset"])
+
+                # File info needs the netCDF on disk; wait for the overlapped write
+                if nc_write_future is not None:
+                    nc_write_future.result()
+                    add_file_info_to_asset(nc_asset, nc_asset.href)
         finally:
             ds.close()
 

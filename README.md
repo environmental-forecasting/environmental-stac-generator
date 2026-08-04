@@ -37,7 +37,7 @@ envstacgen --env-file .env.development ingest data/stac/catalog.json -o
 
 Paths to one or more `.nc` files, directories, or wildcard patterns.
 
-Lead valid times are inferred from the netCDF (`forecast_date` when present, otherwise `leadtime` / `lead_time` offsets). A compact frequency label is stored in `data/config.json` for consistency checks between runs — you do not pass `1days` on the CLI.
+Lead valid times are inferred from the netCDF (`forecast_date` when present, otherwise `leadtime` / `lead_time` offsets). A compact frequency label is stored in `data/config.json` for consistency checks between runs - you do not pass `1days` on the CLI.
 
 ### Options
 

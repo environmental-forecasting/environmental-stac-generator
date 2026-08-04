@@ -220,7 +220,7 @@ def add_file_info_to_asset(asset: Asset, file_path: str) -> Asset:
             file_ext.data_type = dtype
             file_ext.byte_order = src.profile.get("endian", "little") + "-endian"
     elif ext in [".jpg", ".jpeg", ".png"]:
-        # Image formats – assume 8-bit unsigned int
+        # Image formats - assume 8-bit unsigned int
         file_ext.data_type = "uint8"
         file_ext.bit_depth = 8
         file_ext.byte_order = "little-endian"

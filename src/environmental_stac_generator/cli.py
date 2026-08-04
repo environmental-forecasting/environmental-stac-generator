@@ -36,9 +36,6 @@ def main_callback(
 
 @app.command(help="Generate COGs and generate static JSON STAC catalog.")
 def preprocess(
-    forecast_frequency: str = typer.Argument(
-        ..., help="The forecast frequency (e.g., 6hours, 1days, etc.)"
-    ),
     input: list[str] = typer.Argument(
         ..., help="Input file, directory or wildcard pattern"
     ),
@@ -69,7 +66,6 @@ def preprocess(
 ):
     logger.debug(f"Command line input arguments: {sys.argv}")
     preprocess_main(
-        forecast_frequency=forecast_frequency,
         input=input,
         name=name,
         workers=workers,

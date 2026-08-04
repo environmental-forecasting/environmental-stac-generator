@@ -7,7 +7,9 @@ from datetime import datetime as dt
 
 import numpy as np
 import orjson
+import pandas as pd
 import xarray as xr
+from dateutil.relativedelta import relativedelta
 from dateutil.tz import tzutc
 from rasterio.crs import CRS
 from rasterio.warp import transform_bounds
@@ -175,6 +177,205 @@ def parse_forecast_frequency(forecast_frequency: str) -> (float, str):
         return float(value), unit
     else:
         raise ValueError(f"Invalid leadtime format: {forecast_frequency}")
+
+
+_LEAD_UNIT_ALIASES = {
+    "h": "hours",
+    "hr": "hours",
+    "hrs": "hours",
+    "hour": "hours",
+    "hours": "hours",
+    "d": "days",
+    "day": "days",
+    "days": "days",
+    "w": "weeks",
+    "week": "weeks",
+    "weeks": "weeks",
+    "mon": "months",
+    "month": "months",
+    "months": "months",
+    "y": "years",
+    "yr": "years",
+    "year": "years",
+    "years": "years",
+}
+
+
+def _normalise_lead_unit(unit: str) -> str | None:
+    token = unit.strip().lower().split()[0]
+    return _LEAD_UNIT_ALIASES.get(token)
+
+
+def infer_lead_unit(leadtime_coords: xr.DataArray, ds: xr.Dataset | None = None) -> str:
+    """
+    Infer the unit of numeric leadtime / lead_time coordinates.
+
+    Preference order: coordinate ``units`` / encoding, long_name hints, then
+    dataset ``time_coverage_resolution`` (ISO-8601), else days with a warning.
+    """
+    raw = (
+        leadtime_coords.attrs.get("units")
+        or leadtime_coords.encoding.get("units")
+        or ""
+    )
+    raw = str(raw).strip()
+    if raw and "since" not in raw.lower():
+        normalised = _normalise_lead_unit(raw)
+        if normalised:
+            return normalised
+
+    long_name = str(leadtime_coords.attrs.get("long_name") or "").lower()
+    for needle, unit in (
+        ("hour", "hours"),
+        ("day", "days"),
+        ("week", "weeks"),
+        ("month", "months"),
+        ("year", "years"),
+    ):
+        if needle in long_name:
+            return unit
+
+    resolution = ""
+    if ds is not None:
+        resolution = str(ds.attrs.get("time_coverage_resolution") or "").upper()
+    if resolution.startswith("PT") and "H" in resolution:
+        return "hours"
+    if resolution.startswith("P") and "W" in resolution:
+        return "weeks"
+    if resolution.startswith("P") and "M" in resolution and "T" not in resolution[:2]:
+        # P1M / P3M month periods (not PT…)
+        if re.match(r"^P\d*M$", resolution):
+            return "months"
+    if resolution.startswith("P") and "D" in resolution:
+        return "days"
+
+    logger.warning(
+        "Leadtime coordinate has no usable units; assuming days "
+        "(set CF units on leadtime or provide forecast_date)"
+    )
+    return "days"
+
+
+def _offset_timestamp(reference, value: float, unit: str):
+    """Add a CF-style lead offset to a forecast reference time."""
+    ref = pd.Timestamp(reference)
+    if unit == "hours":
+        return ref + pd.Timedelta(hours=float(value))
+    if unit == "days":
+        return ref + pd.Timedelta(days=float(value))
+    if unit == "weeks":
+        return ref + pd.Timedelta(weeks=float(value))
+    if unit == "months":
+        return ref + relativedelta(months=int(value))
+    if unit == "years":
+        return ref + relativedelta(years=int(value))
+    raise ValueError(f"Unsupported leadtime unit: {unit}")
+
+
+def resolve_valid_times(
+    forecast_reference_time,
+    leadtime_coords: xr.DataArray,
+    ds_slice: xr.Dataset | None = None,
+) -> list:
+    """
+    Resolve absolute valid times for each lead index.
+
+    Prefer ``forecast_date`` on the init slice when present (IceNet), then
+    datetime/timedelta lead coordinates, else ``init + lead_offset`` using
+    inferred units.
+    """
+    if leadtime_coords is None:
+        raise ValueError("Dataset is missing leadtime / lead_time coordinates")
+
+    nlead = int(leadtime_coords.size)
+    if nlead < 1:
+        raise ValueError("Leadtime coordinate is empty")
+
+    if ds_slice is not None and "forecast_date" in ds_slice.variables:
+        fd = ds_slice["forecast_date"]
+        # Drop a leftover length-1 time axis if present.
+        if "time" in fd.dims and fd.sizes.get("time") == 1:
+            fd = fd.isel(time=0)
+        values = np.asarray(fd.values).reshape(-1)
+        if values.size != nlead:
+            raise ValueError(
+                f"forecast_date length ({values.size}) != leadtime ({nlead})"
+            )
+        if not np.issubdtype(values.dtype, np.datetime64):
+            units = fd.attrs.get("units") or fd.encoding.get("units")
+            if units and "since" in str(units).lower():
+                decoded = xr.decode_cf(xr.Dataset({"forecast_date": fd}))[
+                    "forecast_date"
+                ]
+                values = np.asarray(decoded.values).reshape(-1)
+            else:
+                raise ValueError(
+                    "forecast_date is numeric but missing CF 'units' (… since …)"
+                )
+        return [pd.Timestamp(v).to_pydatetime() for v in values]
+
+    values = np.asarray(leadtime_coords.values).reshape(-1)
+    if values.size != nlead:
+        values = values.reshape(-1)[:nlead]
+
+    if np.issubdtype(values.dtype, np.datetime64):
+        return [pd.Timestamp(v).to_pydatetime() for v in values]
+
+    if np.issubdtype(values.dtype, np.timedelta64):
+        ref = pd.Timestamp(forecast_reference_time)
+        return [(ref + pd.Timedelta(v)).to_pydatetime() for v in values]
+
+    unit = infer_lead_unit(leadtime_coords, ds_slice)
+    return [
+        _offset_timestamp(forecast_reference_time, float(v), unit).to_pydatetime()
+        for v in values
+    ]
+
+
+def forecast_frequency_from_valid_times(valid_times: list) -> str:
+    """
+    Infer a compact frequency label (e.g. ``1days``, ``6hours``) from valid times.
+
+    Used for ``config.json`` consistency checks between preprocess runs.
+    """
+    if len(valid_times) < 2:
+        return "1days"
+
+    seconds = []
+    for a, b in zip(valid_times, valid_times[1:]):
+        delta = pd.Timestamp(b) - pd.Timestamp(a)
+        seconds.append(delta.total_seconds())
+    median_s = float(np.median(seconds))
+    if median_s <= 0:
+        raise ValueError("Lead valid times are not strictly increasing")
+
+    hour = 3600.0
+    day = 86400.0
+    week = 7 * day
+    month = 30 * day
+    year = 365 * day
+
+    if median_s < day * 0.9:
+        step = median_s / hour
+        unit = "hours"
+    elif median_s < week * 0.9:
+        step = median_s / day
+        unit = "days"
+    elif median_s < month * 0.9:
+        step = median_s / week
+        unit = "weeks"
+    elif median_s < year * 0.9:
+        step = median_s / month
+        unit = "months"
+    else:
+        step = median_s / year
+        unit = "years"
+
+    if abs(step - round(step)) < 1e-6:
+        step_str = str(int(round(step)))
+    else:
+        step_str = f"{step:g}"
+    return f"{step_str}{unit}"
 
 
 def proj_to_geo(bbox_projected: list[float], src_crs: str) -> list[float]:

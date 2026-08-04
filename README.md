@@ -29,15 +29,15 @@ This tool is designed to be used with [environmental-stac-orchestrator](https://
 Pass an orchestrator environment file with `--env-file` for **ingest** (database credentials and `FILE_SERVER_URL`). Preprocess does not need it: the static catalog stores portable cwd-relative asset paths (e.g. `data/cogs/...`), and ingest prefixes `FILE_SERVER_URL` when loading into pgSTAC.
 
 ```bash
-envstacgen preprocess 1days ./results/predict/*.nc
+envstacgen preprocess ./results/predict/*.nc
 envstacgen --env-file .env.development ingest data/stac/catalog.json -o
 ```
 
 ### Positional Parameters
 
-The first parameter is the forecast frequency (e.g., "6hours", "1days").
+Paths to one or more `.nc` files, directories, or wildcard patterns.
 
-The second and further arguments are the paths to one or more `.nc` files, directories, or wildcard patterns.
+Lead valid times are inferred from the netCDF (`forecast_date` when present, otherwise `leadtime` / `lead_time` offsets). A compact frequency label is stored in `data/config.json` for consistency checks between runs — you do not pass `1days` on the CLI.
 
 ### Options
 
@@ -64,7 +64,7 @@ The ingestion step requires a reachable PostgreSQL/pgSTAC instance (typically th
 ### Step 1
 
 ```bash
-envstacgen preprocess 1days raw_data/*.nc -o
+envstacgen preprocess raw_data/*.nc -o
 ```
 
 This will:

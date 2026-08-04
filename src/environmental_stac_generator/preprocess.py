@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(
-    forecast_frequency: str,
     input: list[str],
     name: str,
     workers: int,
@@ -29,7 +28,6 @@ def main(
     (portable); apply ``FILE_SERVER_URL`` at ingest.
 
     Args:
-        forecast_frequency: The frequency of forecasts.
         input: List of input netCDF files or directories.
         name: Collection name.
         workers: Max number of concurrent workers.
@@ -44,7 +42,7 @@ def main(
         None
 
     Examples:
-        >>> envstacgen preprocess 1days raw_data/*.nc -o --name icenet
+        >>> envstacgen preprocess raw_data/*.nc -o --name icenet
     """
     if input is None:
         default_dir = "results/predict"
@@ -82,7 +80,6 @@ def main(
                 name=name,
                 compress=compress,
                 overwrite=overwrite,
-                forecast_frequency=forecast_frequency,
                 stac_only=stac_only,
                 workers=workers,
             )

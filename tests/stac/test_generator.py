@@ -1,4 +1,5 @@
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -66,6 +67,7 @@ def test_set_out_paths(stac, tmp_path):
     assert stac._netcdf_output_dir == tmp_path / "netcdf" / "test_collection"
     assert stac._cogs_output_dir == tmp_path / "cogs" / "test_collection"
     assert stac._config_output_path == tmp_path / "config.json"
+
 
 
 def test_store_config_new_file(stac, tmp_path):
@@ -316,9 +318,8 @@ def test_process_leadtime_stac_only_without_cog(tmp_path):
     _, cog_file, assets, _ = STACGenerator._process_leadtime(
         i=0,
         ds_leadtime_slice=ds,
+        valid_time=datetime(2025, 1, 2),
         forecast_reference_time=datetime(2025, 1, 1),
-        leadtime_unit="days",
-        leadtime_step=1,
         x_coord="xc",
         y_coord="yc",
         crs="EPSG:6931",

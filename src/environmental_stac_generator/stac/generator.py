@@ -11,7 +11,6 @@ import pandas as pd
 import pystac
 import rasterio
 import xarray as xr
-from dateutil.relativedelta import relativedelta
 from deepdiff import DeepDiff
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
@@ -24,11 +23,12 @@ from ..utils import (
     DEFAULT_WORKERS,
     ensure_utc,
     find_coord,
+    forecast_frequency_from_valid_times,
     format_time,
     get_da_statistics,
     get_nc_attributes,
     hemisphere_from_dataset,
-    parse_forecast_frequency,
+    resolve_valid_times,
     proj_to_geo,
 )
 from .utils import (
@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 DT_FMT_FILENAME = "%Y-%m-%d_%H%M"       # Filesystem-safe format for COG filenames and item IDs
 DT_FMT_DISPLAY = "%Y-%m-%d %H:%M"       # Human-readable format for asset titles
 DT_FMT_ISO8601 = "%Y-%m-%dT%H:%M:%SZ"   # ISO 8601 format for STAC properties
+
 
 
 class BaseSTAC:
@@ -615,7 +616,6 @@ class STACGenerator(BaseSTAC):
         self,
         nc_file: Path,
         name: str,
-        forecast_frequency: str = "1days",
         compress: bool = True,
         overwrite: bool = False,
         stac_only: bool = False,
@@ -633,8 +633,6 @@ class STACGenerator(BaseSTAC):
         Args:
             nc_file: Path to the input netCDF file.
             name: Collection identifier to place processed data into.
-            forecast_frequency: Frequency of forecasts (e.g., "1days").
-                Defaults to "1days".
             compress: Whether to compress COG output using DEFLATE.
                 Defaults to True.
             overwrite: Whether to overwrite existing files.
@@ -645,17 +643,14 @@ class STACGenerator(BaseSTAC):
                 Defaults to 1
         """
         self._collection_name = name
-        self._forecast_frequency = forecast_frequency
+        self._compress = compress
         self._compress_method = "DEFLATE" if compress else "NONE"
+        self._overwrite = overwrite
+
         nc_file = Path(nc_file).resolve()
 
         # Initialise output paths
         self._set_out_paths()
-
-        self._validate_input_options()
-
-        # Get input time delta options to compute forecast times
-        leadtime_step, leadtime_unit = parse_forecast_frequency(forecast_frequency)
 
         catalog = self.catalog
 
@@ -678,22 +673,45 @@ class STACGenerator(BaseSTAC):
                 ),
                 ds,
             ) = self._forecast_info_from_dataset(ds)
+            if leadtime_coords is None:
+                raise ValueError(
+                    "Dataset is missing leadtime / lead_time coordinates"
+                )
             nleadtime = len(leadtime_coords)
+            lead_dim = leadtime_coords.dims[0]
+            time_dim = time_coords.dims[0]
+
+            # Infer frequency from the first init for config.json consistency checks
+            # (valid times themselves come from forecast_date / leadtime values).
+            first_time = time_coords.isel({time_dim: 0})
+            first_slice = ds.sel({time_dim: first_time})
+            first_ref = pd.to_datetime(first_time.values)
+            sample_valid_times = resolve_valid_times(
+                first_ref, leadtime_coords, first_slice
+            )
+            self._forecast_frequency = forecast_frequency_from_valid_times(
+                sample_valid_times
+            )
+            logger.info(
+                "Inferred forecast_frequency=%s from lead coordinates",
+                self._forecast_frequency,
+            )
+            self._validate_input_options()
 
             # Create (or retrieve) highest level collection (model name) within the catalog
             collection = self.get_or_create_collection(
                 parent=catalog,
                 collection_id=name,
                 title=f"{name}",
-                description=f"{name.capitalize().replace("_", " ").replace("-", " ")} collection",
+                description=f"{name.capitalize().replace('_', ' ').replace('-', ' ')} collection",
                 bbox=bbox,
-                extra_fields = {"custom:hemisphere": hemisphere} if hemisphere else None,
+                extra_fields={"custom:hemisphere": hemisphere} if hemisphere else None,
                 license=self._license,
                 temporal_extent=[time_coords_start, time_coords_end],
             )
 
             for time_idx, time_val in enumerate(time_coords):
-                ds_time_slice = ds.sel(time=time_val)
+                ds_time_slice = ds.sel({time_dim: time_val})
 
                 # The forecast initialisation time (CF Convention: `forecast_reference_time`)
                 # is the first forecast being predicted
@@ -703,9 +721,11 @@ class STACGenerator(BaseSTAC):
                 # Filesystem-safe format for item IDs and netCDF filenames
                 forecast_reference_time_filesafe = format_time(forecast_reference_time)
 
-                forecast_end_time = forecast_reference_time + relativedelta(
-                    **{leadtime_unit: nleadtime - 1} # type: ignore
+                # Absolute valid times per lead (handles irregular spacing)
+                valid_times = resolve_valid_times(
+                    forecast_reference_time, leadtime_coords, ds_time_slice
                 )
+                forecast_end_time = valid_times[-1]
                 forecast_end_time_str = datetime_to_str(forecast_end_time)
 
                 # Create output dirs
@@ -733,14 +753,14 @@ class STACGenerator(BaseSTAC):
                         self._write_netcdf, ds_time_slice, out_nc_file
                     )
 
-                properties={
+                properties = {
                     "forecast:reference_time": forecast_reference_time_str,
                     "forecast:end_time": forecast_end_time_str,
                     "forecast:leadtime_length": nleadtime,
                 }
 
                 nc_metadata = get_nc_attributes(ds_time_slice.attrs)
-                properties |=  nc_metadata
+                properties |= nc_metadata
 
                 # Add STAC Item for this netCDF file
                 item = self.get_or_create_item(
@@ -748,8 +768,8 @@ class STACGenerator(BaseSTAC):
                     item_id=item_id,
                     geometry=geometry,
                     bbox=bbox,
-                    datetime=forecast_reference_time, # Becomes "Time of Data" property, under Metadata -> General in STAC-Browser
-                                                      # Used for temporal filtering of items
+                    datetime=forecast_reference_time,  # Becomes "Time of Data" property, under Metadata -> General in STAC-Browser
+                                                       # Used for temporal filtering of items
                     start_datetime=forecast_reference_time,
                     end_datetime=forecast_end_time,
                     crs=crs,
@@ -760,25 +780,25 @@ class STACGenerator(BaseSTAC):
 
                 # Add netCDF asset to item
                 nc_asset = Asset(
-                        href=str(out_nc_file.resolve()),
-                        media_type=pystac.MediaType.NETCDF,
-                        title=f"Full forecast netCDF from {forecast_reference_time.strftime(DT_FMT_DISPLAY)}",
-                        description="netCDF file container forecast variables for forecast"
-                                    f" initialised at: {forecast_reference_time_str}",
-                        roles=["data"],
-                        extra_fields={
-                            "forecast:reference_time": forecast_reference_time_str,
-                            "forecast:end_time": forecast_end_time_str,
-                            "forecast:leadtime_length": nleadtime,
-                        }
-                    )
+                    href=str(out_nc_file.resolve()),
+                    media_type=pystac.MediaType.NETCDF,
+                    title=f"Full forecast netCDF from {forecast_reference_time.strftime(DT_FMT_DISPLAY)}",
+                    description=(
+                        "netCDF file container forecast variables for forecast"
+                        f" initialised at: {forecast_reference_time_str}"
+                    ),
+                    roles=["data"],
+                    extra_fields={
+                        "forecast:reference_time": forecast_reference_time_str,
+                        "forecast:end_time": forecast_end_time_str,
+                        "forecast:leadtime_length": nleadtime,
+                    },
+                )
 
                 item.add_asset(key="netcdf", asset=nc_asset)
 
                 common_args = (
                     forecast_reference_time,
-                    leadtime_unit,
-                    leadtime_step,
                     x_coord,
                     y_coord,
                     crs,
@@ -798,29 +818,28 @@ class STACGenerator(BaseSTAC):
                 with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
                     futures = []
                     for i in range(nleadtime):
-                        ds_leadtime_slice = ds_time_slice.isel(leadtime=i).load()
+                        ds_leadtime_slice = ds_time_slice.isel({lead_dim: i}).load()
                         future = executor.submit(
                             STACGenerator._process_leadtime,
                             i,
                             ds_leadtime_slice,
+                            valid_times[i],
                             *common_args,
                         )
                         future.add_done_callback(lambda _: pbar.update(1))
                         futures.append(future)
 
-                    # Wait for all futures to complete
                     for future in futures:
                         i, cog_file, assets, pbar_description = future.result()
                         pbar.set_description(pbar_description)
                         for asset in assets:
                             item.add_asset(key=asset["key"], asset=asset["asset"])
                             add_file_info_to_asset(asset["asset"], asset["asset"].href)
-                            # Use the first thumbnail generated for this item as the
-                            # thumbnail for the collection as well.
                             if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
-                                # Skip if the collection already has a thumbnail asset
                                 if not collection.get_assets(role="thumbnail"):
-                                    collection.add_asset(key=asset["key"], asset=asset["asset"])
+                                    collection.add_asset(
+                                        key=asset["key"], asset=asset["asset"]
+                                    )
 
                 # File info needs the netCDF on disk; wait for the overlapped write
                 if nc_write_future is not None:
@@ -829,14 +848,12 @@ class STACGenerator(BaseSTAC):
         finally:
             ds.close()
 
-
     @staticmethod
     def _process_leadtime(
         i: int,
         ds_leadtime_slice: xr.Dataset,
+        valid_time: datetime,
         forecast_reference_time: datetime,
-        leadtime_unit: str,
-        leadtime_step: int,
         x_coord: str,
         y_coord: str,
         crs: str,
@@ -854,9 +871,8 @@ class STACGenerator(BaseSTAC):
         Args:
             i: Index of the current leadtime.
             ds_leadtime_slice: In-memory xarray Dataset for this leadtime only.
+            valid_time: Absolute valid time for this lead.
             forecast_reference_time: The forecast initialisation time.
-            leadtime_unit: Unit of leadtime (e.g., 'days').
-            leadtime_step: Step size for leadtimes.
             x_coord: X dimension coordinate name.
             y_coord: Y dimension coordinate name.
             crs: Coordinate Reference System (EPSG code).
@@ -876,15 +892,12 @@ class STACGenerator(BaseSTAC):
                 - assets: List of asset dictionaries with metadata.
                 - pbar_description: Description for progress bar updates.
         """
-        valid_time = forecast_reference_time + relativedelta(
-            **{leadtime_unit: i * leadtime_step} # type: ignore
-        )
-
         # Set spatial dimensions for rioxarray
         ds_leadtime_slice.rio.set_spatial_dims(
             x_dim=x_coord, y_dim=y_coord, inplace=True
         )
 
+        valid_time = pd.Timestamp(valid_time).to_pydatetime()
         valid_time_str = datetime_to_str(valid_time)
 
         # Add STAC Item for this file

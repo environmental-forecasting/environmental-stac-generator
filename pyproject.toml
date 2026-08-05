@@ -48,6 +48,11 @@ dev = [
     "prompt_toolkit==3.0.36"
 ]
 
+[dependency-groups]
+docs = [
+    "zensical",
+]
+
 [project.scripts]
 envstacgen = "environmental_stac_generator.cli:main"
 

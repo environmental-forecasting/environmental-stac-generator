@@ -26,11 +26,11 @@ pip install -e .
 
 This tool is designed to be used with [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator).
 
-Pass an orchestrator environment file with `--env-file` for **ingest** (database credentials and `FILE_SERVER_URL`). Preprocess does not need it: the static catalog stores portable cwd-relative asset paths (e.g. `data/cogs/...`), and ingest prefixes `FILE_SERVER_URL` when loading into pgSTAC.
+Pass an orchestrator environment file with `--env-file` on **ingest** (database credentials and `FILE_SERVER_URL`). Preprocess does not need it: the static catalog stores portable cwd-relative asset paths (e.g. `data/cogs/...`), and ingest prefixes `FILE_SERVER_URL` when loading into pgSTAC.
 
 ```bash
 envstacgen preprocess ./results/predict/*.nc
-envstacgen --env-file .env.development ingest data/stac/catalog.json -o
+envstacgen ingest --env-file .env.development data/stac/catalog.json -o
 ```
 
 ### Positional Parameters
@@ -41,13 +41,7 @@ Lead valid times are inferred from the netCDF (`forecast_date` when present, oth
 
 ### Options
 
-Global option (before the subcommand):
-
-| Flag | Description |
-| ---- | ----------- |
-| `--env-file` | Path to an environment file (e.g. `.env.development`) |
-
-The optional flags that can be used are:
+`preprocess` options:
 
 | Flag                  | Description                                                            |
 | --------------------- | ---------------------------------------------------------------------- |
@@ -56,6 +50,13 @@ The optional flags that can be used are:
 | `--name`, `-n`        | Specify a collection name (default: "default")                         |
 | `--workers`, `-w`     | Max concurrent workers (default: CPU count)                            |
 | `--stac-only`, `-s`   | Output only the STAC files, not COGs/Thumbnails (default not enabled)  |
+
+`ingest` options:
+
+| Flag | Description |
+| ---- | ----------- |
+| `--env-file` | Path to an environment file (e.g. `.env.development`) |
+| `--overwrite`, `-o` | Overwrite existing matching entries |
 
 The ingestion step requires a reachable PostgreSQL/pgSTAC instance (typically the [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator) stack). See that repository’s README.
 
@@ -76,7 +77,7 @@ This will:
 ### Step 2
 
 ```bash
-envstacgen --env-file .env.development ingest data/stac/catalog.json -o
+envstacgen ingest --env-file .env.development data/stac/catalog.json -o
 ```
 
 This will:
@@ -86,3 +87,14 @@ This will:
 ## License
 
 `environmental-stac-generator` is licensed under the MIT license. See [LICENSE](https://github.com/environmental-forecasting/environmental-stac-generator/blob/main/LICENSE) for more information.
+
+## Documentation
+
+Docs can be built with:
+
+```bash
+make docs-install
+make docs
+```
+
+Related: [environmental-stac-orchestrator](https://github.com/environmental-forecasting/environmental-stac-orchestrator), [environmental-stac-dashboard](https://github.com/environmental-forecasting/environmental-stac-dashboard).

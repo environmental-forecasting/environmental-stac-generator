@@ -15,23 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 @app.callback()
-def main_callback(
-    ctx: typer.Context,
-    env_file: Optional[Path] = typer.Option(
-        None,
-        "--env-file",
-        help="Path to environment file (e.g. .env.development); used by ingest "
-        "for database settings and FILE_SERVER_URL. "
-        "Falls back to .env if present, otherwise process environment variables.",
-        exists=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-    ),
-):
+def main_callback():
     """Environmental STAC generator CLI."""
-    ctx.ensure_object(dict)
-    ctx.obj["env_file"] = env_file
 
 
 @app.command(help="Generate COGs and generate static JSON STAC catalog.")
@@ -77,17 +62,27 @@ def preprocess(
 
 @app.command(help="Ingest generated JSON STAC catalog into pgSTAC database.")
 def ingest(
-    ctx: typer.Context,
     catalog: str = typer.Argument(..., help="Path to the STAC catalog JSON file."),
     overwrite: bool = typer.Option(
         False, "-o", "--overwrite", help="Overwrite any matching collections/items"
+    ),
+    env_file: Optional[Path] = typer.Option(
+        None,
+        "--env-file",
+        help="Path to environment file (e.g. .env.development) for database "
+        "settings and FILE_SERVER_URL. Falls back to .env if present, otherwise "
+        "process environment variables.",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
     ),
 ):
     logger.debug(f"Command line input arguments: {sys.argv}")
     ingest_main(
         catalog=catalog,
         overwrite=overwrite,
-        env_file=ctx.obj.get("env_file"),
+        env_file=env_file,
     )
 
 

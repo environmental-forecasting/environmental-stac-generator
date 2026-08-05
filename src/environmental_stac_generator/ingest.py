@@ -32,7 +32,7 @@ def main(
         Exception: Any exception raised by the underlying `PGSTACDataLoader`.
 
     Examples:
-        >>> envstacgen --env-file .env.development ingest data/stac/catalog.json
+        >>> envstacgen ingest --env-file .env.development data/stac/catalog.json
     """
     config = get_settings(env_file)
     pg_db_url = config.database_url

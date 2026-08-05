@@ -8,7 +8,7 @@ icon: lucide/terminal
 
 ## preprocess
 
-Generate COGs and a static JSON STAC catalogue.
+Generate COGs and a static JSON STAC catalogue. Input files must follow the [netCDF layout](netcdf-layout.md).
 
 ### Arguments
 

@@ -12,6 +12,7 @@ repo_name = "environmental-stac-generator"
 nav = [
   { "Home" = "index.md" },
   { "CLI" = "cli.md" },
+  { "netCDF layout" = "netcdf-layout.md" },
   { "Related projects" = "related.md" },
 ]
 

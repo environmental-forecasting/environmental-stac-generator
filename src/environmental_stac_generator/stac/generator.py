@@ -618,7 +618,7 @@ class STACGenerator(BaseSTAC):
         Args:
             nc_file: Path to the input netCDF file.
             name: Collection identifier to place processed data into.
-            compress: Whether to compress COG output using DEFLATE.
+            compress: Whether to compress COG output using ZSTD.
                 Defaults to True.
             overwrite: Whether to overwrite existing files.
                 Defaults to False.
@@ -629,7 +629,7 @@ class STACGenerator(BaseSTAC):
         """
         self._collection_name = name
         self._compress = compress
-        self._compress_method = "DEFLATE" if compress else "NONE"
+        self._compress_method = "ZSTD" if compress else "NONE"
         self._overwrite = overwrite
 
         nc_file = Path(nc_file).resolve()
@@ -862,7 +862,7 @@ class STACGenerator(BaseSTAC):
             valid_bands: List of valid variable names to process.
                 i.e., having 4 dimensions (time, yc, xc, leadtime).
             overwrite: Whether to overwrite existing files.
-            compress_method: COG compression method (e.g. ``DEFLATE`` or ``NONE``).
+            compress_method: COG compression method (e.g. ``ZSTD``, ``DEFLATE``, or ``NONE``).
             reproject: Whether to reproject to EPSG:4326.
                 Defaults to False.
 
@@ -1036,7 +1036,7 @@ class STACGenerator(BaseSTAC):
             y_coord: Y dimension coordinate name.
             crs: Coordinate Reference System (EPSG code).
             cog_file: Path to the output COG file.
-            compress_method: COG compression method (e.g. ``DEFLATE`` or ``NONE``).
+            compress_method: COG compression method (e.g. ``ZSTD``, ``DEFLATE``, or ``NONE``).
             reproject: Whether to reproject to EPSG:4326.
                 Defaults to False.
             band_statistics: Optional per-band statistics already computed for

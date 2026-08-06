@@ -69,3 +69,6 @@ addopts = [
   "--import-mode=importlib",
 ]
 testpaths = ["tests"]
+filterwarnings = [
+  "ignore:.*Non-standard compression schema.*:UserWarning:rio_cogeo.*",
+]

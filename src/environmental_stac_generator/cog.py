@@ -1,5 +1,6 @@
 import logging
 import subprocess
+import warnings
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -12,6 +13,15 @@ from rio_cogeo.profiles import cog_profiles
 from .utils import get_array_statistics
 
 logger = logging.getLogger(__name__)
+
+# Suppress rio-cogeo's legacy advisory warning regarding ZSTD in TIFF specifications.
+# ZSTD is standard in libtiff 4.0.10+ and GDAL 2.3+ (used by TiTiler, QGIS, etc.).
+warnings.filterwarnings(
+    "ignore",
+    message=r".*Non-standard compression schema: zstd.*",
+    category=UserWarning,
+    module=r"rio_cogeo.*",
+)
 
 # Band tags written into the COG (and mirrored into STAC forecast:bands).
 _STAT_TAG_KEYS = (
@@ -53,7 +63,7 @@ def _dataarray_to_raster_array(da: xr.DataArray) -> tuple[np.ndarray, int, int, 
 def write_cog(
     cog_path: Path,
     da: xr.DataArray,
-    compress: str = "DEFLATE",
+    compress: str = "ZSTD",
     block_size: int = 256,
     overview_level: int = 5,
     overview_resampling: str = "bilinear",
@@ -73,7 +83,7 @@ def write_cog(
         da: xr.DataArray containing geospatial data. Must have a valid
             coordinate reference system (CRS) and spatial extent.
         compress: Compression method to use for the COG.
-            Defaults to "DEFLATE".
+            Defaults to "ZSTD".
         block_size: Block size (in pixels) used for tiling.
             Defaults to 256.
         overview_level: Number of overviews to generate. This defines how many
@@ -94,14 +104,38 @@ def write_cog(
 
         - ``external_overviews=True`` requires GDAL (``gdaladdo``) on PATH.
     """
-    dst_profile = cog_profiles.get("deflate")
-    dst_profile.update(
-        {
-            "compress": compress,
-            "blockxsize": block_size,
-            "blockysize": block_size,
-        }
-    )
+    compress_norm = (compress or "NONE").upper()
+    if compress_norm in ("NONE", "RAW"):
+        dst_profile = cog_profiles.get("raw")
+        dst_profile.update(
+            {
+                "blockxsize": block_size,
+                "blockysize": block_size,
+            }
+        )
+        dst_profile.pop("predictor", None)
+        dst_profile.pop("zstd_level", None)
+    else:
+        profile_name = (
+            compress_norm.lower()
+            if compress_norm.lower() in ("deflate", "zstd", "lzw", "webp", "packbits")
+            else "deflate"
+        )
+        dst_profile = cog_profiles.get(profile_name)
+        dst_profile.update(
+            {
+                "compress": compress_norm,
+                "blockxsize": block_size,
+                "blockysize": block_size,
+            }
+        )
+        if compress_norm == "ZSTD":
+            dst_profile["zstd_level"] = 7
+            dst_profile["predictor"] = 2
+        elif compress_norm in ("DEFLATE", "LZW"):
+            dst_profile["predictor"] = 2
+        else:
+            dst_profile.pop("predictor", None)
 
     data, count, height, width = _dataarray_to_raster_array(da)
     src_profile = {
@@ -131,6 +165,7 @@ def write_cog(
                     mem.update_tags(i, **tags)
 
         # Re-open read-only for cog_translate (write-mode datasets are deprecated).
+        allow_intermediate_compression = compress_norm not in ("NONE", "RAW")
         with memfile.open() as mem:
             cog_translate(
                 source=mem,
@@ -140,6 +175,8 @@ def write_cog(
                 overview_resampling=overview_resampling,
                 forward_band_tags=True,
                 in_memory=True,
+                allow_intermediate_compression=allow_intermediate_compression,
+                temporary_compression=compress_norm if allow_intermediate_compression else "DEFLATE",
                 quiet=True,
             )
 

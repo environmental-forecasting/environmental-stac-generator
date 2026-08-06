@@ -34,6 +34,7 @@ def test_write_cog_default_has_internal_overviews_only(tmp_path: Path) -> None:
     with rasterio.open(cog_path) as src:
         assert src.tags(1).get("STATISTICS_MINIMUM") is not None
         assert src.tags(1).get("STATISTICS_MAXIMUM") is not None
+        assert src.compression.name.upper() == "ZSTD"
         overviews = src.overviews(1)
         assert len(overviews) == 5
         assert overviews == [2, 4, 8, 16, 32]
@@ -82,3 +83,19 @@ def test_write_cog_external_overviews_calls_gdaladdo(tmp_path: Path) -> None:
 
     assert cog_path.is_file()
     assert cog_path.with_suffix(".tif.ovr").is_file()
+
+
+def test_write_cog_explicit_deflate(tmp_path: Path) -> None:
+    cog_path = tmp_path / "deflate.tif"
+    write_cog(cog_path, _small_da(), compress="DEFLATE")
+
+    with rasterio.open(cog_path) as src:
+        assert src.compression.name.upper() == "DEFLATE"
+
+
+def test_write_cog_explicit_none(tmp_path: Path) -> None:
+    cog_path = tmp_path / "raw.tif"
+    write_cog(cog_path, _small_da(), compress="NONE")
+
+    with rasterio.open(cog_path) as src:
+        assert src.compression is None or src.compression.name.upper() == "NONE"

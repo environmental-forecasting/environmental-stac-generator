@@ -34,7 +34,9 @@ def test_write_cog_default_has_internal_overviews_only(tmp_path: Path) -> None:
     with rasterio.open(cog_path) as src:
         assert src.tags(1).get("STATISTICS_MINIMUM") is not None
         assert src.tags(1).get("STATISTICS_MAXIMUM") is not None
-        assert len(src.overviews(1)) > 0
+        overviews = src.overviews(1)
+        assert len(overviews) == 5
+        assert overviews == [2, 4, 8, 16, 32]
 
 
 def test_write_cog_uses_provided_band_statistics(tmp_path: Path) -> None:
@@ -61,7 +63,8 @@ def test_write_cog_external_overviews_calls_gdaladdo(tmp_path: Path) -> None:
     cog_path = tmp_path / "demo.tif"
 
     def _fake_gdaladdo(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        Path(cmd[3]).with_suffix(".tif.ovr").write_bytes(b"ovr")
+        path_arg = next(arg for arg in cmd if arg.endswith(".tif"))
+        Path(path_arg).with_suffix(".tif.ovr").write_bytes(b"ovr")
         return None
 
     with patch(
@@ -70,8 +73,12 @@ def test_write_cog_external_overviews_calls_gdaladdo(tmp_path: Path) -> None:
     ) as gdaladdo:
         write_cog(cog_path, _small_da(), external_overviews=True)
         gdaladdo.assert_called_once()
-        assert gdaladdo.call_args.args[0][0] == "gdaladdo"
-        assert gdaladdo.call_args.args[0][3] == str(cog_path)
+        cmd = gdaladdo.call_args.args[0]
+        assert cmd[0] == "gdaladdo"
+        assert "-r" in cmd
+        assert "bilinear" in cmd
+        assert str(cog_path) in cmd
+        assert "32" in cmd
 
     assert cog_path.is_file()
     assert cog_path.with_suffix(".tif.ovr").is_file()

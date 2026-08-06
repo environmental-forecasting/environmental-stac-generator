@@ -55,7 +55,8 @@ def write_cog(
     da: xr.DataArray,
     compress: str = "DEFLATE",
     block_size: int = 256,
-    overview_level: int = 4,
+    overview_level: int = 5,
+    overview_resampling: str = "bilinear",
     external_overviews: bool = False,
     band_statistics: Sequence[dict[str, Any]] | None = None,
 ) -> None:
@@ -76,8 +77,10 @@ def write_cog(
         block_size: Block size (in pixels) used for tiling.
             Defaults to 256.
         overview_level: Number of overviews to generate. This defines how many
-            downsampled versions of the raster will be created.
-            Defaults to 4.
+            downsampled versions of the raster will be created (powers of 2:
+            2, 4, 8, 16, 32). Defaults to 5.
+        overview_resampling: Resampling algorithm for internal overviews.
+            Defaults to "bilinear".
         external_overviews: If True, also builds external ``.ovr`` files with
             ``gdaladdo`` (extra preprocess cost; not required for COG readers).
             Defaults to False.
@@ -134,23 +137,23 @@ def write_cog(
                 dst_path=cog_path,
                 dst_kwargs=dst_profile,
                 overview_level=overview_level,
-                overview_resampling="average",
+                overview_resampling=overview_resampling,
                 forward_band_tags=True,
                 in_memory=True,
                 quiet=True,
             )
 
     if external_overviews:
+        overviews = [str(2**i) for i in range(1, overview_level + 1)]
         subprocess.run(
             [
                 "gdaladdo",
                 "-q",
+                "-r",
+                overview_resampling,
                 "-ro",
                 str(cog_path),
-                "2",
-                "4",
-                "8",
-                "16",
+                *overviews,
             ],
             check=True,
         )

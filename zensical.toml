@@ -1,5 +1,5 @@
 [project]
-# site_url = "https://environmental-forecasting.github.io/environmental-stac-generator/"
+site_url = "https://environmental-forecasting.github.io/environmental-stac-generator/"
 site_name = "environmental-stac-generator"
 site_description = "Convert forecast netCDF to COGs and STAC catalogues"
 site_author = "Bryn Noel Ubald"

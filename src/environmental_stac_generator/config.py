@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,9 +20,15 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        """Return the PostgreSQL DSN for connecting to the database."""
+        """Return the PostgreSQL DSN for connecting to the database.
+
+        User and password are percent-encoded so symbols such as ``%``, ``!``,
+        ``@``, and ``,`` do not break the URI.
+        """
+        user = quote(self.database_user, safe="")
+        password = quote(self.database_password, safe="")
         return (
-            f"postgresql://{self.database_user}:{self.database_password}"
+            f"postgresql://{user}:{password}"
             f"@{self.host_ip}:{self.database_port}/{self.database_dbname}"
         )
 

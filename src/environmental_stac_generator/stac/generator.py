@@ -202,8 +202,6 @@ class BaseSTAC:
         crs: str,
         properties: dict,
         datetime: datetime,
-        start_datetime: datetime | None = None,
-        end_datetime: datetime | None = None,
     ) -> Item:
         """
         Retrieve or create a STAC Item within the given parent collection.
@@ -233,11 +231,10 @@ class BaseSTAC:
                 bbox=bbox,
                 properties=properties,
                 datetime=datetime,
-                # # Setting following will mean that when filtering time in STAC Browser,
-                # # it would show any forecast inits with leadtimes that overlap with
-                # # the selected time range, so, not setting a time range.
-                # start_datetime=start_datetime,
-                # end_datetime=end_datetime,
+                # One instant: the forecast start. Do not set a start/end
+                # range over all leads. That would make STAC Browser and a
+                # datetime search match every overlapping run. The dashboard
+                # opens a day with datetime = this instant.
             )
             # Add projection extension
             ProjectionExtension.add_to(item)
@@ -750,8 +747,6 @@ class STACGenerator(BaseSTAC):
                     bbox=bbox,
                     datetime=forecast_reference_time,  # Becomes "Time of Data" property, under Metadata -> General in STAC-Browser
                                                        # Used for temporal filtering of items
-                    start_datetime=forecast_reference_time,
-                    end_datetime=forecast_end_time,
                     crs=crs,
                     properties=properties,
                 )

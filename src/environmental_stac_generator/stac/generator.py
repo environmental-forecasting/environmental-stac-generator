@@ -1,6 +1,6 @@
 import logging
 from abc import abstractmethod
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -755,10 +755,9 @@ class STACGenerator(BaseSTAC):
                             logger.info(f"Item {item_id} already exists with all files on disk; skipping.")
                             continue
 
-                # Load forecast-init slice once into memory before background netcdf writing.
-                # `.load()` materialises the slice so pickling for COG workers stays small
-                # without an extra deep copy of the xarray structure.
-                ds_time_slice = ds_time_slice.load()
+                # Write the netCDF file in addition to the STAC json output
+                if not stac_only and (not out_nc_file.exists() or overwrite):
+                    self._write_netcdf(ds_time_slice, out_nc_file)
 
 
                 properties = {
@@ -802,18 +801,13 @@ class STACGenerator(BaseSTAC):
                 )
 
                 item.add_asset(key="netcdf", asset=nc_asset)
-                thread_executor = None
-                nc_future = None
                 if not stac_only:
-                    def write_and_hash():
-                        if not out_nc_file.exists() or overwrite:
-                            self._write_netcdf(ds_time_slice, out_nc_file)
-                        add_file_info_to_asset(nc_asset, str(out_nc_file.resolve()))
-                    
-                    # Spawn a background thread for the heavy NetCDF disk I/O and hashing.
-                    # This allows the main thread to immediately spin up the COG multiprocessing pool.
-                    thread_executor = ThreadPoolExecutor(max_workers=1)
-                    nc_future = thread_executor.submit(write_and_hash)
+                    add_file_info_to_asset(nc_asset, str(out_nc_file.resolve()))
+
+                # Load the forecast-init slice once, then hand each worker only its
+                # leadtime. `.load()` materialises that slice so pickling stays small
+                # without an extra deep copy of the xarray structure.
+                ds_time_slice = ds_time_slice.load()
                 common_args = (
                     forecast_reference_time,
                     x_coord,
@@ -856,10 +850,6 @@ class STACGenerator(BaseSTAC):
                                     collection.add_asset(
                                         key=asset["key"], asset=asset["asset"].clone()
                                     )
-                    if nc_future is not None:
-                        nc_future.result()
-                    if thread_executor is not None:
-                        thread_executor.shutdown()
         finally:
             ds.close()
 

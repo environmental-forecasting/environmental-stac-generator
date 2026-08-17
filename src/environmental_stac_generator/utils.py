@@ -16,7 +16,7 @@ from rasterio.warp import transform_bounds
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WORKERS = os.cpu_count() or 1
+DEFAULT_WORKERS = min(os.cpu_count() or 1, 8)
 
 
 def find_coord(ds: xr.Dataset, possible_names: list[str]) -> str | None:

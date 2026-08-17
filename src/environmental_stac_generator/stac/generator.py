@@ -826,11 +826,13 @@ class STACGenerator(BaseSTAC):
                 with tqdm(total=nleadtime, desc="Lead times", position=1, leave=False) as pbar:
                     futures = []
                     for i in range(nleadtime):
-                        ds_leadtime_slice = ds_time_slice.isel({lead_dim: i}).load()
                         future = executor.submit(
                             STACGenerator._process_leadtime,
                             i,
-                            ds_leadtime_slice,
+                            nc_file,
+                            time_idx,
+                            time_dim,
+                            lead_dim,
                             valid_times[i],
                             *common_args,
                         )
@@ -853,7 +855,10 @@ class STACGenerator(BaseSTAC):
     @staticmethod
     def _process_leadtime(
         i: int,
-        ds_leadtime_slice: xr.Dataset,
+        nc_file: Path,
+        time_idx: int,
+        time_dim: str,
+        lead_dim: str,
         valid_time: datetime,
         forecast_reference_time: datetime,
         x_coord: str,
@@ -872,7 +877,10 @@ class STACGenerator(BaseSTAC):
 
         Args:
             i: Index of the current leadtime.
-            ds_leadtime_slice: In-memory xarray Dataset for this leadtime only.
+            nc_file: Path to the original netCDF file.
+            time_idx: Time index within the file.
+            time_dim: Name of the time dimension.
+            lead_dim: Name of the leadtime dimension.
             valid_time: Absolute valid time for this lead.
             forecast_reference_time: The forecast initialisation time.
             x_coord: X dimension coordinate name.
@@ -894,6 +902,10 @@ class STACGenerator(BaseSTAC):
                 - assets: List of asset dictionaries with metadata.
                 - pbar_description: Description for progress bar updates.
         """
+        # Open the specific chunk independently in this worker thread, without caching to prevent memory leaks
+        with xr.open_dataset(nc_file, cache=False) as ds:
+            ds_leadtime_slice = ds.isel({time_dim: time_idx, lead_dim: i}).load()
+
         # Set spatial dimensions for rioxarray
         ds_leadtime_slice.rio.set_spatial_dims(
             x_dim=x_coord, y_dim=y_coord, inplace=True

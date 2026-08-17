@@ -309,15 +309,21 @@ def test_process_leadtime_stac_only_without_cog(tmp_path):
     yc = np.linspace(-1000, 1000, ny)
     ds = xr.Dataset(
         {
-            "sic_mean": (("yc", "xc"), np.random.rand(ny, nx)),
-            "sic_stddev": (("yc", "xc"), np.random.rand(ny, nx)),
+            "sic_mean": (("time", "leadtime", "yc", "xc"), np.random.rand(1, 1, ny, nx)),
+            "sic_stddev": (("time", "leadtime", "yc", "xc"), np.random.rand(1, 1, ny, nx)),
         },
         coords={"xc": xc, "yc": yc},
     )
 
+    mock_nc = tmp_path / "mock.nc"
+    ds.to_netcdf(mock_nc)
+
     _, cog_file, assets, _ = STACGenerator._process_leadtime(
         i=0,
-        ds_leadtime_slice=ds,
+        nc_file=mock_nc,
+        time_idx=0,
+        time_dim="time",
+        lead_dim="leadtime",
         valid_time=datetime(2025, 1, 2),
         forecast_reference_time=datetime(2025, 1, 1),
         x_coord="xc",

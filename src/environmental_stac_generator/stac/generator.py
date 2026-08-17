@@ -725,9 +725,32 @@ class STACGenerator(BaseSTAC):
                 # Save the forecast init slice as a netcdf file
                 out_nc_file = ncdf_dir / f"{forecast_reference_time_filesafe}.nc"
 
+                # If not overwriting and item already exists with all assets on disk, skip processing
+                if not overwrite and not stac_only:
+                    existing_item = collection.get_item(item_id)
+                    if existing_item:
+                        all_files_exist = out_nc_file.exists()
+                        if all_files_exist:
+                            for vt in valid_times:
+                                vt_dt = pd.Timestamp(vt).to_pydatetime()
+                                item_id_cog = f"{item_id}_lead_{vt_dt.strftime(DT_FMT_FILENAME)}"
+                                if not (cog_dir / f"{item_id_cog}.tif").exists():
+                                    all_files_exist = False
+                                    break
+                            if all_files_exist:
+                                first_vt_dt = pd.Timestamp(valid_times[0]).to_pydatetime()
+                                first_item_id_cog = f"{item_id}_lead_{first_vt_dt.strftime(DT_FMT_FILENAME)}"
+                                if not (cog_dir / f"{first_item_id_cog}.jpg").exists():
+                                    all_files_exist = False
+                                
+                        if all_files_exist:
+                            logger.info(f"Item {item_id} already exists with all files on disk; skipping.")
+                            continue
+
                 # Write the netCDF file in addition to the STAC json output
                 if not stac_only:
-                    self._write_netcdf(ds_time_slice, out_nc_file)
+                    if not out_nc_file.exists() or overwrite:
+                        self._write_netcdf(ds_time_slice, out_nc_file)
 
 
                 properties = {
@@ -903,7 +926,25 @@ class STACGenerator(BaseSTAC):
             # Only include statistics if not reprojecting, else stats will be different
             # would need to add after reprojecting.
             if not reproject:
-                stats = get_da_statistics(da_variable)
+                stats = None
+                if cog_file.exists() and not overwrite and not stac_only:
+                    try:
+                        with rasterio.open(cog_file) as src:
+                            tags = src.tags(bidx)
+                            if "STATISTICS_MINIMUM" in tags:
+                                stats = {
+                                    "STATISTICS_MINIMUM": float(tags["STATISTICS_MINIMUM"]) if tags.get("STATISTICS_MINIMUM") not in ('None', None) else None,
+                                    "STATISTICS_MAXIMUM": float(tags["STATISTICS_MAXIMUM"]) if tags.get("STATISTICS_MAXIMUM") not in ('None', None) else None,
+                                    "STATISTICS_MEAN": float(tags["STATISTICS_MEAN"]) if tags.get("STATISTICS_MEAN") not in ('None', None) else None,
+                                    "STATISTICS_STDDEV": float(tags["STATISTICS_STDDEV"]) if tags.get("STATISTICS_STDDEV") not in ('None', None) else None,
+                                    "STATISTICS_VALID_PERCENT": tags.get("STATISTICS_VALID_PERCENT"),
+                                }
+                    except Exception as e:
+                        logger.warning(f"Failed to read stats from {cog_file}: {e}")
+
+                if stats is None:
+                    stats = get_da_statistics(da_variable)
+
                 metadata |= stats
                 band_statistics.append(stats)
             band_metadata.append(metadata)

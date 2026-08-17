@@ -804,10 +804,7 @@ class STACGenerator(BaseSTAC):
                 if not stac_only:
                     add_file_info_to_asset(nc_asset, str(out_nc_file.resolve()))
 
-                # Load the forecast-init slice once, then hand each worker only its
-                # leadtime. `.load()` materialises that slice so pickling stays small
-                # without an extra deep copy of the xarray structure.
-                ds_time_slice = ds_time_slice.load()
+
                 common_args = (
                     forecast_reference_time,
                     x_coord,

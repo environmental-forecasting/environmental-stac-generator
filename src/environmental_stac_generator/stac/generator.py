@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import orjson
 import pandas as pd
 import pystac
-import rasterio
 import xarray as xr
 from deepdiff import DeepDiff
 from pystac import Asset, Catalog, Collection, Item
@@ -80,6 +79,10 @@ class BaseSTAC:
 
         self._set_catalog_path()
         self.get_or_create_catalog(catalog_defs=catalog_defs)
+
+        # Track modified entities for efficient saving
+        self._modified_collections: set[Collection] = set()
+        self._modified_items: set[Item] = set()
 
     def _set_catalog_path(self) -> None:
         """
@@ -173,6 +176,7 @@ class BaseSTAC:
                 ),
             )
             parent.add_child(collection)
+            self._modified_collections.add(collection)
         else:
             # Update the existing collection's temporal extent
             existing_intervals = collection.extent.temporal.intervals[0]
@@ -190,6 +194,7 @@ class BaseSTAC:
             # Update only if the extent has changed
             if (existing_start != updated_start) or (existing_end != updated_end):
                 collection.extent.temporal.intervals = [[updated_start, updated_end]]
+                self._modified_collections.add(collection)
 
         return collection  # type: ignore
 
@@ -241,6 +246,9 @@ class BaseSTAC:
             proj = ProjectionExtension.ext(item)
             proj.code = crs # type: ignore
             collection.add_item(item)
+
+            self._modified_items.add(item)
+            self._modified_collections.add(collection)
         return item # type: ignore
 
     def create_multiband_raster(
@@ -742,15 +750,14 @@ class STACGenerator(BaseSTAC):
                                 first_item_id_cog = f"{item_id}_lead_{first_vt_dt.strftime(DT_FMT_FILENAME)}"
                                 if not (cog_dir / f"{first_item_id_cog}.jpg").exists():
                                     all_files_exist = False
-                                
+
                         if all_files_exist:
                             logger.info(f"Item {item_id} already exists with all files on disk; skipping.")
                             continue
 
                 # Write the netCDF file in addition to the STAC json output
-                if not stac_only:
-                    if not out_nc_file.exists() or overwrite:
-                        self._write_netcdf(ds_time_slice, out_nc_file)
+                if not stac_only and (not out_nc_file.exists() or overwrite):
+                    self._write_netcdf(ds_time_slice, out_nc_file)
 
 
                 properties = {
@@ -778,7 +785,7 @@ class STACGenerator(BaseSTAC):
 
                 # Add netCDF asset to item
                 nc_asset = Asset(
-                    href=str(out_nc_file.resolve()),
+                    href=to_cwd_relative_href(str(out_nc_file.resolve())),
                     media_type=pystac.MediaType.NETCDF,
                     title=f"Full forecast netCDF from {forecast_reference_time.strftime(DT_FMT_DISPLAY)}",
                     description=(
@@ -794,7 +801,8 @@ class STACGenerator(BaseSTAC):
                 )
 
                 item.add_asset(key="netcdf", asset=nc_asset)
-                nc_asset = add_file_info_to_asset(nc_asset, nc_asset.href)
+                if not stac_only:
+                    add_file_info_to_asset(nc_asset, str(out_nc_file.resolve()))
 
                 # Load the forecast-init slice once, then hand each worker only its
                 # leadtime. `.load()` materialises that slice so pickling stays small
@@ -837,7 +845,6 @@ class STACGenerator(BaseSTAC):
                         pbar.set_description(pbar_description)
                         for asset in assets:
                             item.add_asset(key=asset["key"], asset=asset["asset"])
-                            add_file_info_to_asset(asset["asset"], asset["asset"].href)
                             if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
                                 if not collection.get_assets(role="thumbnail"):
                                     collection.add_asset(
@@ -926,25 +933,7 @@ class STACGenerator(BaseSTAC):
             # Only include statistics if not reprojecting, else stats will be different
             # would need to add after reprojecting.
             if not reproject:
-                stats = None
-                if cog_file.exists() and not overwrite and not stac_only:
-                    try:
-                        with rasterio.open(cog_file) as src:
-                            tags = src.tags(bidx)
-                            if "STATISTICS_MINIMUM" in tags:
-                                stats = {
-                                    "STATISTICS_MINIMUM": float(tags["STATISTICS_MINIMUM"]) if tags.get("STATISTICS_MINIMUM") not in ('None', None) else None,
-                                    "STATISTICS_MAXIMUM": float(tags["STATISTICS_MAXIMUM"]) if tags.get("STATISTICS_MAXIMUM") not in ('None', None) else None,
-                                    "STATISTICS_MEAN": float(tags["STATISTICS_MEAN"]) if tags.get("STATISTICS_MEAN") not in ('None', None) else None,
-                                    "STATISTICS_STDDEV": float(tags["STATISTICS_STDDEV"]) if tags.get("STATISTICS_STDDEV") not in ('None', None) else None,
-                                    "STATISTICS_VALID_PERCENT": tags.get("STATISTICS_VALID_PERCENT"),
-                                }
-                    except Exception as e:
-                        logger.warning(f"Failed to read stats from {cog_file}: {e}")
-
-                if stats is None:
-                    stats = get_da_statistics(da_variable)
-
+                stats = get_da_statistics(da_variable)
                 metadata |= stats
                 band_statistics.append(stats)
             band_metadata.append(metadata)
@@ -979,27 +968,24 @@ class STACGenerator(BaseSTAC):
                         forecast_reference_time,
                         valid_time,
                     )
-
-            with rasterio.open(cog_file) as src:
-                width = src.width
-                height = src.height
-                transform = list(src.transform)[:6]
-                epsg_code = src.crs.to_epsg()
         else:
             pbar_description = f"Processing STAC: {item_id_cog}"
-            # Derive projection metadata from the in-memory array when no COG is written
-            da_ref = da_list[0]
-            width = int(da_ref.rio.width)
-            height = int(da_ref.rio.height)
-            transform = list(da_ref.rio.transform())[:6]
-            epsg_code = da_ref.rio.crs.to_epsg() if da_ref.rio.crs else None
+
+        # Derive projection metadata from the in-memory array (no disk read needed)
+        da_ref = da_list[0]
+        if reproject:
+            da_ref = da_ref.rio.reproject("EPSG:4326", inplace=False)
+        width = int(da_ref.rio.width)
+        height = int(da_ref.rio.height)
+        transform = list(da_ref.rio.transform())[:6]
+        epsg_code = da_ref.rio.crs.to_epsg() if da_ref.rio.crs else None
 
         assets = []
         # Add COG asset to item
         cog_asset = dict(
             key=valid_time_str,
             asset=Asset(
-                href=str(cog_file.resolve()),
+                href=to_cwd_relative_href(str(cog_file.resolve())),
                 media_type=pystac.MediaType.COG,
                 title=f"Forecast at {valid_time.strftime(DT_FMT_DISPLAY)}",
                 description=f"Variables: {', '.join(band_names)}",
@@ -1014,20 +1000,27 @@ class STACGenerator(BaseSTAC):
                 },
             ),
         )
+        if not stac_only:
+            add_file_info_to_asset(
+                cog_asset["asset"],
+                str(cog_file.resolve()),
+                data_type=str(da_multiband.dtype),
+                byte_order="little-endian"
+            )
         assets.append(cog_asset)
 
-        # Thumbnail asset only when we wrote (or expect) a thumbnail file
         if i == 0 and not stac_only:
             # Some STAC tools may only show the first thumbnail asset
             thumbnail_asset = dict(
                 key="thumbnail",
                 asset=Asset(
-                    href=str(thumbnail_file.resolve()),
+                    href=to_cwd_relative_href(str(thumbnail_file.resolve())),
                     media_type=pystac.MediaType.JPEG,
                     title="Thumbnail",
                     roles=["thumbnail"],
                 ),
             )
+            add_file_info_to_asset(thumbnail_asset["asset"], str(thumbnail_file.resolve()))
             assets.append(thumbnail_asset)
 
         return i, cog_file, assets, pbar_description
@@ -1132,12 +1125,12 @@ class STACGenerator(BaseSTAC):
         catalog = self.catalog
         catalog.normalize_hrefs(str(self._stac_output_dir))
 
-        for collection in catalog.get_all_collections():
+        for collection in self._modified_collections:
             refresh_collection_summaries(collection)
-            for asset in collection.assets.values():
-                asset.href = to_cwd_relative_href(asset.href)
-        for item in catalog.get_items(recursive=True):
-            for asset in item.assets.values():
-                asset.href = to_cwd_relative_href(asset.href)
+            collection.save_object()
 
-        catalog.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)
+        for item in self._modified_items:
+            item.save_object()
+
+        # Save root catalog object (it might have new collections or links)
+        catalog.save_object()

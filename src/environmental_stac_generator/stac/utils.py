@@ -151,7 +151,7 @@ def file_multihash(file_path: str) -> str:
     return digest.hex()
 
 
-def file_block_multihash(file_path: str, block_size=8192) -> str:
+def file_block_multihash(file_path: str, block_size=1048576) -> str:
     """Computes a multihash-encoded MD5 digest over a file in blocks.
 
     Reads the file in chunks and computes an MD5 digest incrementally,
@@ -160,7 +160,7 @@ def file_block_multihash(file_path: str, block_size=8192) -> str:
     Args:
         file_path: Path to the file to hash.
         block_size (optional): Size of each block to read from the file in bytes.
-            Defaults to 8192.
+            Defaults to 1048576 (1 MB).
 
     Returns:
         Hexadecimal string of the final multihash-encoded MD5 digest.
@@ -173,7 +173,12 @@ def file_block_multihash(file_path: str, block_size=8192) -> str:
     return digest.hex()
 
 
-def add_file_info_to_asset(asset: Asset, file_path: str) -> Asset:
+def add_file_info_to_asset(
+    asset: Asset,
+    file_path: str,
+    data_type: str | None = None,
+    byte_order: str | None = None
+) -> Asset:
     """
     Adds STAC File Info Extension metadata to an asset based on file type.
 
@@ -182,6 +187,9 @@ def add_file_info_to_asset(asset: Asset, file_path: str) -> Asset:
     Args:
         asset: The STAC asset to update. Must have a parent Item.
         file_path: Path to the local file (or directory for Zarr).
+        data_type: Optional pre-known data type (e.g., 'float32', 'uint8').
+            If provided, avoids opening the file to detect it.
+        byte_order: Optional pre-known byte order (e.g., 'little-endian').
 
     Returns:
         The updated asset with file extension metadata.
@@ -213,12 +221,16 @@ def add_file_info_to_asset(asset: Asset, file_path: str) -> Asset:
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext in [".tif", ".tiff"]:
-        with rasterio.open(file_path) as src:
-            if src.count == 0:
-                raise ValueError(f"No bands found in raster: {file_path}")
-            dtype = src.dtypes[0]
-            file_ext.data_type = dtype
-            file_ext.byte_order = src.profile.get("endian", "little") + "-endian"
+        if data_type and byte_order:
+            file_ext.data_type = data_type
+            file_ext.byte_order = byte_order
+        else:
+            with rasterio.open(file_path) as src:
+                if src.count == 0:
+                    raise ValueError(f"No bands found in raster: {file_path}")
+                dtype = src.dtypes[0]
+                file_ext.data_type = dtype
+                file_ext.byte_order = src.profile.get("endian", "little") + "-endian"
     elif ext in [".jpg", ".jpeg", ".png"]:
         # Image formats - assume 8-bit unsigned int
         file_ext.data_type = "uint8"

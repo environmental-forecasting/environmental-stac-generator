@@ -73,8 +73,8 @@ def main(
     stac_generator = STACGenerator()
 
     try:
-        for nc_file in (pbar := tqdm(nc_files, desc="COGifying files", leave=True)):  # type: ignore
-            pbar.set_description(f"Processing {nc_file}")
+        for nc_file in (pbar := tqdm(nc_files, desc="Files", position=0, leave=True)):  # type: ignore
+            pbar.set_description(f"Processing {nc_file.name}")
             stac_generator.process(
                 nc_file=nc_file,
                 name=name,

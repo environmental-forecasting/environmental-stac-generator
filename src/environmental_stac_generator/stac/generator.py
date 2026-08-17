@@ -682,7 +682,7 @@ class STACGenerator(BaseSTAC):
             self._forecast_frequency = forecast_frequency_from_valid_times(
                 sample_valid_times
             )
-            logger.info(
+            logger.debug(
                 "Inferred forecast_frequency=%s from lead coordinates",
                 self._forecast_frequency,
             )
@@ -752,7 +752,7 @@ class STACGenerator(BaseSTAC):
                                     all_files_exist = False
 
                         if all_files_exist:
-                            logger.info(f"Item {item_id} already exists with all files on disk; skipping.")
+                            logger.debug(f"Item {item_id} already exists with all files on disk; skipping.")
                             continue
 
                 # Write the netCDF file in addition to the STAC json output
@@ -823,7 +823,7 @@ class STACGenerator(BaseSTAC):
                 # (which mutates as assets are added and caused "dictionary changed
                 # size during iteration").
                 executor = self._get_executor(workers)
-                with tqdm(total=nleadtime, desc="COGifying files", leave=True) as pbar:
+                with tqdm(total=nleadtime, desc="Lead times", position=1, leave=False) as pbar:
                     futures = []
                     for i in range(nleadtime):
                         ds_leadtime_slice = ds_time_slice.isel({lead_dim: i}).load()
@@ -940,9 +940,9 @@ class STACGenerator(BaseSTAC):
             da_multiband = None
 
             if cog_file.exists() and not overwrite:
-                pbar_description = f"File already exists, skipping: {cog_file}"
+                pbar_description = f"Skipping existing: {cog_file.name}"
             else:
-                pbar_description = f"Saving vars to multi-band COG: {cog_file}"
+                pbar_description = f"Saving COG: {cog_file.name}"
                 # Stack variables as a single dataset
                 da_multiband = xr.concat(da_list, dim="band")
                 da_multiband = da_multiband.assign_coords(band=("band", band_names))

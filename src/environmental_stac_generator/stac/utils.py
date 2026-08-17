@@ -195,8 +195,8 @@ def add_file_info_to_asset(
         The updated asset with file extension metadata.
     """
 
-    # Attach file extension if missing
-    file_ext = FileExtension.ext(asset, add_if_missing=True)
+    # Attach file extension if missing (only when asset has an owner Item/Collection)
+    file_ext = FileExtension.ext(asset, add_if_missing=(asset.owner is not None))
 
     # Set file size
     if os.path.isdir(file_path):

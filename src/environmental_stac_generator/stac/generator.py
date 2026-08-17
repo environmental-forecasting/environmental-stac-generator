@@ -949,14 +949,16 @@ class STACGenerator(BaseSTAC):
             band_metadata.append(metadata)
 
         if not stac_only:
-            # Stack variables as a single dataset
-            da_multiband = xr.concat(da_list, dim="band")
-            da_multiband = da_multiband.assign_coords(band=("band", band_names))
+            da_dtype = str(da_list[0].dtype)
+            da_multiband = None
 
             if cog_file.exists() and not overwrite:
                 pbar_description = f"File already exists, skipping: {cog_file}"
             else:
                 pbar_description = f"Saving vars to multi-band COG: {cog_file}"
+                # Stack variables as a single dataset
+                da_multiband = xr.concat(da_list, dim="band")
+                da_multiband = da_multiband.assign_coords(band=("band", band_names))
 
                 STACGenerator._write_cog(
                     da_multiband,
@@ -972,6 +974,9 @@ class STACGenerator(BaseSTAC):
             # Create thumbnail plot for only the first variable for the first leadtime
             if i == 0:
                 if not thumbnail_file.exists() or overwrite:
+                    if da_multiband is None:
+                        da_multiband = xr.concat(da_list, dim="band")
+                        da_multiband = da_multiband.assign_coords(band=("band", band_names))
                     STACGenerator._create_and_write_thumbnail(
                         da_multiband,
                         thumbnail_file,
@@ -1014,7 +1019,7 @@ class STACGenerator(BaseSTAC):
             add_file_info_to_asset(
                 cog_asset["asset"],
                 str(cog_file.resolve()),
-                data_type=str(da_multiband.dtype),
+                data_type=da_dtype,
                 byte_order="little-endian"
             )
         assets.append(cog_asset)

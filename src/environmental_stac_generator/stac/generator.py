@@ -1041,7 +1041,8 @@ class STACGenerator(BaseSTAC):
         encoding = {
             var: {
                 "zlib": True,
-                "complevel": 9,
+                "complevel": 4,
+                "shuffle": True,
             } for var in ds_time_slice.data_vars
         }
         ds_time_slice.to_netcdf(

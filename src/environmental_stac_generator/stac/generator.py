@@ -848,7 +848,7 @@ class STACGenerator(BaseSTAC):
                             if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
                                 if not collection.get_assets(role="thumbnail"):
                                     collection.add_asset(
-                                        key=asset["key"], asset=asset["asset"]
+                                        key=asset["key"], asset=asset["asset"].clone()
                                     )
         finally:
             ds.close()

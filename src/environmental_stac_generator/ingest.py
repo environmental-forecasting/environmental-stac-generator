@@ -25,14 +25,14 @@ def main(
         catalog: Path to the JSON STAC catalog file to be ingested.
         overwrite: Whether to overwrite any existing matching collections/items.
                    Defaults to False.
-        env_file: Optional path to an environment file (e.g. ``.env.development``).
+        env_file: Optional path to an environment file (e.g. ``.env.dev``).
 
     Raises:
         FileNotFoundError: If no valid JSON files are found for ingestion.
         Exception: Any exception raised by the underlying `PGSTACDataLoader`.
 
     Examples:
-        >>> envstacgen ingest --env-file .env.development data/stac/catalog.json
+        >>> envstacgen ingest --env-file .env.dev data/stac/catalog.json
     """
     config = get_settings(env_file)
     pg_db_url = config.database_url

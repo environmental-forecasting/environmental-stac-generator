@@ -69,7 +69,7 @@ def ingest(
     env_file: Optional[Path] = typer.Option(
         None,
         "--env-file",
-        help="Path to environment file (e.g. .env.development) for database "
+        help="Path to environment file (e.g. .env.dev) for database "
         "settings and FILE_SERVER_URL. Falls back to .env if present, otherwise "
         "process environment variables.",
         exists=True,

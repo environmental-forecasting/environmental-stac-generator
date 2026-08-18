@@ -52,7 +52,7 @@ def test_get_settings_from_env_file(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
 
-    env_path = tmp_path / ".env.development"
+    env_path = tmp_path / ".env.dev"
     env_path.write_text(
         "\n".join(
             [

@@ -36,7 +36,7 @@ Designed for use with the orchestrator. Pass an orchestrator environment file wi
 
 ```bash
 envstacgen preprocess ./results/predict/*.nc
-envstacgen ingest --env-file .env.development data/stac/catalog.json -o
+envstacgen ingest --env-file .env.dev data/stac/catalog.json -o
 ```
 
 See [CLI](cli.md) for flags and a full example, and [netCDF layout](netcdf-layout.md) for required input structure.

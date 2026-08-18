@@ -53,13 +53,13 @@ Load a generated JSON STAC catalogue from the `envstacgen preprocess` command in
 
 | Flag | Description |
 | ---- | ----------- |
-| `--env-file` | Path to an environment file (e.g. `.env.development`) for database credentials and `FILE_SERVER_URL`. Falls back to `.env` if present, otherwise process environment variables. |
+| `--env-file` | Path to an environment file (e.g. `.env.dev`) for database credentials and `FILE_SERVER_URL`. Falls back to `.env` if present, otherwise process environment variables. |
 | `--overwrite`, `-o` | Overwrite existing matching entries (default is to skip matches) |
 
 ### Example
 
 ```bash
-envstacgen ingest --env-file .env.development data/stac/catalog.json -o
+envstacgen ingest --env-file .env.dev data/stac/catalog.json -o
 ```
 
 This will:

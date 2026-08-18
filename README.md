@@ -12,7 +12,7 @@ pip install -e .
 
 ```bash
 envstacgen preprocess ./results/predict/*.nc -o -n my_collection
-envstacgen ingest --env-file .env.development data/stac/catalog.json -o
+envstacgen ingest --env-file .env.dev data/stac/catalog.json -o
 ```
 
 `--env-file` is only needed for **ingest** (database credentials and `FILE_SERVER_URL`). Preprocess writes a portable static catalogue with cwd-relative asset paths.

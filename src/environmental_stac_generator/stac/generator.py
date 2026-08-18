@@ -517,7 +517,7 @@ class STACGenerator(BaseSTAC):
             raise ValueError("Spatial coordinates not found in dataset")
 
         # Convert km to m if needed
-        ds = self._convert_units(ds, x_coord, y_coord)
+        ds = STACGenerator._convert_units(ds, x_coord, y_coord)
 
         # Filter 4D variables - these are variables of interest for COGs
         # Assuming other vars shouldn't be converted to COGs
@@ -549,7 +549,8 @@ class STACGenerator(BaseSTAC):
         )
         return info, ds
 
-    def _convert_units(self, ds: xr.Dataset, x_coord: str, y_coord: str) -> xr.Dataset:
+    @staticmethod
+    def _convert_units(ds: xr.Dataset, x_coord: str, y_coord: str) -> xr.Dataset:
         """
         Convert coordinate units from kilometers to meters if needed.
 
@@ -567,8 +568,10 @@ class STACGenerator(BaseSTAC):
         # Convert eastings and northings from kilometers to metres (if need to).
         if ds.coords[y_coord].attrs.get("units", None) in ["1000 meter", "km"]: # `1000 meter` is legacy support for `icenet < v0.4.0``
             ds = ds.assign_coords({y_coord: ds.coords[y_coord] * 1000})
+            ds.coords[y_coord].attrs["units"] = "meters"
         if ds.coords[x_coord].attrs.get("units", None) in ["1000 meter", "km"]:
             ds = ds.assign_coords({x_coord: ds.coords[x_coord] * 1000})
+            ds.coords[x_coord].attrs["units"] = "meters"
         return ds
 
     def _get_bbox_and_geometry(
@@ -906,6 +909,8 @@ class STACGenerator(BaseSTAC):
         # Open the specific chunk independently in this worker thread, without caching to prevent memory leaks
         with xr.open_dataset(nc_file, cache=False) as ds:
             ds_leadtime_slice = ds.isel({time_dim: time_idx, lead_dim: i}).load()
+
+        ds_leadtime_slice = STACGenerator._convert_units(ds_leadtime_slice, x_coord, y_coord)
 
         # Set spatial dimensions for rioxarray
         ds_leadtime_slice.rio.set_spatial_dims(

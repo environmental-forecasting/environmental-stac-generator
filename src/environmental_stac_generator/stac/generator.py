@@ -247,8 +247,9 @@ class BaseSTAC:
             proj.code = crs # type: ignore
             collection.add_item(item)
 
-            self._modified_items.add(item)
             self._modified_collections.add(collection)
+
+        self._modified_items.add(item)
         return item # type: ignore
 
     def create_multiband_raster(

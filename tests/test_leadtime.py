@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -23,20 +23,20 @@ def test_infer_lead_unit_from_resolution():
 
 
 def test_resolve_valid_times_from_numeric_leadtime():
-    ref = datetime(2026, 7, 15)
+    ref = datetime(2026, 7, 15, tzinfo=UTC)
     lead = xr.DataArray(
         np.array([1, 2, 3], dtype="int64"),
         dims=["leadtime"],
         attrs={"units": "days"},
     )
     times = resolve_valid_times(ref, lead)
-    assert times[0].date() == datetime(2026, 7, 16).date()
-    assert times[-1].date() == datetime(2026, 7, 18).date()
+    assert times[0].date() == datetime(2026, 7, 16, tzinfo=UTC).date()
+    assert times[-1].date() == datetime(2026, 7, 18, tzinfo=UTC).date()
     assert forecast_frequency_from_valid_times(times) == "1days"
 
 
 def test_resolve_valid_times_from_forecast_date():
-    ref = datetime(2026, 7, 15)
+    ref = datetime(2026, 7, 15, tzinfo=UTC)
     lead = xr.DataArray(np.arange(1, 4), dims=["leadtime"])
     fd = xr.DataArray(
         pd.date_range("2026-07-16", periods=3, freq="D"),
@@ -45,9 +45,9 @@ def test_resolve_valid_times_from_forecast_date():
     ds = xr.Dataset({"forecast_date": fd})
     times = resolve_valid_times(ref, lead, ds)
     assert [t.date() for t in times] == [
-        datetime(2026, 7, 16).date(),
-        datetime(2026, 7, 17).date(),
-        datetime(2026, 7, 18).date(),
+        datetime(2026, 7, 16, tzinfo=UTC).date(),
+        datetime(2026, 7, 17, tzinfo=UTC).date(),
+        datetime(2026, 7, 18, tzinfo=UTC).date(),
     ]
 
 

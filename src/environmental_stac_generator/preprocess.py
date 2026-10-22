@@ -49,14 +49,14 @@ def main(
         logger.warning(f"No input specified, search default location: {default_dir}")
         nc_files = get_nc_files("results/predict/")
     elif len(input) == 1:
-        nc_files = flatten_list(
-            list(filter(None, (get_nc_files(f) for f in input)))
-        )
+        nc_files = flatten_list(list(filter(None, (get_nc_files(f) for f in input))))
     else:
         nc_files = [Path(f) for f in input]
 
     if not nc_files:
-        raise FileNotFoundError("No files provided. Please specify which files to convert.")
+        raise FileNotFoundError(
+            "No files provided. Please specify which files to convert."
+        )
 
     missing = [f for f in nc_files if not f.exists()]
     for f in missing:

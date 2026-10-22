@@ -54,25 +54,18 @@ def test_get_settings_from_env_file(tmp_path, monkeypatch):
 
     env_path = tmp_path / ".env.dev"
     env_path.write_text(
-        "\n".join(
-            [
-                "HOST_IP=10.0.0.1",
-                "DATABASE_PORT=5433",
-                "DATABASE_USER=stac",
-                "DATABASE_PASSWORD=secret",
-                "DATABASE_DBNAME=postgis",
-                "FILE_SERVER_URL=http://files.example:8001",
-            ]
-        )
-        + "\n"
+        "HOST_IP=10.0.0.1\n"
+        "DATABASE_PORT=5433\n"
+        "DATABASE_USER=stac\n"
+        "DATABASE_PASSWORD=secret\n"
+        "DATABASE_DBNAME=postgis\n"
+        "FILE_SERVER_URL=http://files.example:8001\n"
     )
 
     settings = get_settings(env_path)
     assert settings.host_ip == "10.0.0.1"
     assert settings.database_port == 5433
-    assert settings.database_url == (
-        "postgresql://stac:secret@10.0.0.1:5433/postgis"
-    )
+    assert settings.database_url == ("postgresql://stac:secret@10.0.0.1:5433/postgis")
     assert settings.file_server_url == "http://files.example:8001"
 
 

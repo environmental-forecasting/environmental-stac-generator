@@ -2,8 +2,9 @@ import logging
 import math
 import os
 import re
-from pathlib import Path
 from datetime import datetime as dt
+from itertools import pairwise
+from pathlib import Path
 
 import numpy as np
 import orjson
@@ -42,9 +43,7 @@ def flatten_list(lst):
         item
         for sublist in lst
         for item in (
-            flatten_list(sublist)
-            if isinstance(sublist, list) or isinstance(sublist, tuple)
-            else [sublist]
+            flatten_list(sublist) if isinstance(sublist, (list, tuple)) else [sublist]
         )
     ]
 
@@ -75,8 +74,10 @@ def get_hemisphere(netcdf_file: Path) -> str:
         lat_min = ds.attrs.get("geospatial_lat_min", None)
 
         if lat_min is None:
-            logger.warning("netCDF does not contain `geospatial_lat_min`, "
-                        "cannot determine hemisphere")
+            logger.warning(
+                "netCDF does not contain `geospatial_lat_min`, "
+                "cannot determine hemisphere"
+            )
             return ""
 
         if 0 <= lat_min <= 90:
@@ -226,10 +227,14 @@ def infer_lead_unit(leadtime_coords: xr.DataArray, ds: xr.Dataset | None = None)
         return "hours"
     if resolution.startswith("P") and "W" in resolution:
         return "weeks"
-    if resolution.startswith("P") and "M" in resolution and "T" not in resolution[:2]:
+    if (
+        resolution.startswith("P")
+        and "M" in resolution
+        and "T" not in resolution[:2]
         # P1M / P3M month periods (not PT…)
-        if re.match(r"^P\d*M$", resolution):
-            return "months"
+        and re.match(r"^P\d*M$", resolution)
+    ):
+        return "months"
     if resolution.startswith("P") and "D" in resolution:
         return "days"
 
@@ -326,7 +331,7 @@ def forecast_frequency_from_valid_times(valid_times: list) -> str:
         return "1days"
 
     seconds = []
-    for a, b in zip(valid_times, valid_times[1:]):
+    for a, b in pairwise(valid_times):
         delta = pd.Timestamp(b) - pd.Timestamp(a)
         seconds.append(delta.total_seconds())
     median_s = float(np.median(seconds))
@@ -356,7 +361,7 @@ def forecast_frequency_from_valid_times(valid_times: list) -> str:
         unit = "years"
 
     if abs(step - round(step)) < 1e-6:
-        step_str = str(int(round(step)))
+        step_str = str(round(step))
     else:
         step_str = f"{step:g}"
     return f"{step_str}{unit}"
@@ -391,7 +396,7 @@ def ensure_utc(datetime: dt) -> dt:
     return datetime.astimezone(tzutc())
 
 
-def format_time(datetime: dt, utc: bool=True, with_seconds: bool=True) -> str:
+def format_time(datetime: dt, utc: bool = True, with_seconds: bool = True) -> str:
     """
     Format a datetime object into a filename-safe ISO-like string.
 

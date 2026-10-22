@@ -7,8 +7,8 @@ from typing import Any
 import rasterio
 import xarray as xr
 import zarr
-from pystac import Asset, Catalog, Collection, MediaType, Summaries
 from multiformats import multihash
+from pystac import Asset, Catalog, Collection, MediaType, Summaries
 from pystac.extensions.file import FileExtension
 from pystac.utils import datetime_to_str
 
@@ -90,7 +90,9 @@ def to_cwd_relative_href(href: str, cwd: Path | None = None) -> str:
         return href
 
 
-def apply_file_server_url(href: str, file_server_url: str, cwd: Path | None = None) -> str:
+def apply_file_server_url(
+    href: str, file_server_url: str, cwd: Path | None = None
+) -> str:
     """
     Prefix a local/portable asset href with ``file_server_url``.
 
@@ -177,7 +179,7 @@ def add_file_info_to_asset(
     asset: Asset,
     file_path: str,
     data_type: str | None = None,
-    byte_order: str | None = None
+    byte_order: str | None = None,
 ) -> Asset:
     """
     Adds STAC File Info Extension metadata to an asset based on file type.

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and platform_machine == 'ARM64' and sys_platform == 'win32'",
@@ -11,12 +11,12 @@ resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
@@ -595,7 +595,7 @@ dependencies = [
     { name = "xarray", extra = ["io"] },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "coverage" },
     { name = "ipython" },
@@ -604,42 +604,41 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
-
-[package.dev-dependencies]
 docs = [
     { name = "zensical" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "coverage", marker = "extra == 'dev'" },
     { name = "deepdiff" },
-    { name = "ipython", marker = "extra == 'dev'", specifier = "==8.18.0" },
     { name = "matplotlib" },
     { name = "multiformats" },
-    { name = "mypy", marker = "extra == 'dev'" },
     { name = "numpy" },
     { name = "orjson" },
-    { name = "prompt-toolkit", marker = "extra == 'dev'", specifier = "==3.0.36" },
     { name = "psycopg", extras = ["pool", "binary"] },
     { name = "pydantic-settings" },
     { name = "pypgstac" },
     { name = "pystac" },
-    { name = "pytest", marker = "extra == 'dev'" },
     { name = "python-dateutil" },
     { name = "python-dotenv" },
     { name = "rich", extras = ["jupyter"] },
     { name = "rio-cogeo" },
     { name = "rioxarray" },
-    { name = "ruff", marker = "extra == 'dev'" },
     { name = "shapely" },
     { name = "tqdm" },
     { name = "typer" },
     { name = "xarray", extras = ["io"] },
 ]
-provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
+dev = [
+    { name = "coverage" },
+    { name = "ipython", specifier = "==8.18.0" },
+    { name = "mypy" },
+    { name = "prompt-toolkit", specifier = "==3.0.36" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
 docs = [{ name = "zensical" }]
 
 [[package]]
@@ -2968,12 +2967,12 @@ version = "1.2.12"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ba/c0/374639373a99b62f51c3204521235906dca1ed1886e73f65d6664465b187/typing_validation-1.2.12.tar.gz", hash = "sha256:7ea9463a18bd04922e799cac1954f687e68e9564773f81db491536852ffe1d54", size = 774523, upload-time = "2025-03-18T14:54:49.4Z" }

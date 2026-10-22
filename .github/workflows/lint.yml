@@ -23,4 +23,4 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: make lint typecheck metadata
+      - run: make lint

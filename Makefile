@@ -1,5 +1,8 @@
 .PHONY: docs-install docs docs-build
 
+audit: ## Check locked dependencies for known vulnerabilities
+	uv audit --preview-features audit-command
+
 docs-install:
 	uv sync --group docs --no-install-project
 

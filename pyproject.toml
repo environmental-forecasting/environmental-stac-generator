@@ -38,7 +38,7 @@ dependencies = [
     "xarray[io]",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "coverage",
     "mypy",
@@ -47,8 +47,6 @@ dev = [
     "ipython==8.18.0",
     "prompt_toolkit==3.0.36"
 ]
-
-[dependency-groups]
 docs = [
     "zensical",
 ]

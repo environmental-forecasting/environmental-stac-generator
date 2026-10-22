@@ -46,4 +46,57 @@ If you are proposing a feature:
 
 ### Get Started!
 
-TODO
+Ready to contribute? Here's how to set up `environmental-stac-generator` for local
+development. It requires Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
+
+1. Fork the repository on GitHub and clone your fork locally:
+
+   ```bash
+   git clone git@github.com:<your-username>/environmental-stac-generator.git
+   cd environmental-stac-generator
+   ```
+
+2. Install the project and its dependencies into a virtual environment:
+
+   ```bash
+   uv sync
+   ```
+
+3. Create a branch for your changes:
+
+   ```bash
+   git checkout -b name-of-your-bugfix-or-feature
+   ```
+
+4. Make your changes, adding or updating tests in `tests/` as appropriate.
+
+5. Before committing, run the checks that CI runs:
+
+   ```bash
+   make format  # auto-fix lint issues and format the code with ruff
+   make lint    # check code style and static rules with ruff
+   make test    # run the test suite with pytest and coverage
+   make audit   # check locked dependencies for known vulnerabilities
+   ```
+
+6. If you changed the CLI or netCDF requirements, update the docs in `docs/`
+   and preview them locally:
+
+   ```bash
+   make docs-install
+   make docs  # serves at http://127.0.0.1:8000
+   ```
+
+7. Commit your changes and push your branch to GitHub:
+
+   ```bash
+   git add .
+   git commit -m "Description of your changes"
+   git push origin name-of-your-bugfix-or-feature
+   ```
+
+8. Open a pull request against `main`. Tests (Python 3.12 and 3.13), linting,
+   CodeQL and the OpenSSF Scorecard run automatically on pull requests; please
+   make sure they pass.
+
+Dependency updates are handled automatically by Dependabot.

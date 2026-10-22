@@ -1,8 +1,8 @@
 """Top-level package for environmental_stac_generator."""
 
 __author__ = """Bryn Noel Ubald"""
-__email__ = 'bryald@bas.ac.uk'
-__version__ = '0.0.1'
+__email__ = "bryald@bas.ac.uk"
+__version__ = "0.0.1"
 
 import json
 import logging
@@ -18,5 +18,6 @@ try:
         config = json.load(f)
     dictConfig(config)
 except FileNotFoundError:
-    logging.error(f"File `{logging_config}` not found.")
-    logging.error("Please ensure that the logging_config.jsonfile is defined.")
+    _logger = logging.getLogger(__name__)
+    _logger.error(f"File `{logging_config}` not found.")
+    _logger.error("Please ensure that the logging_config.jsonfile is defined.")

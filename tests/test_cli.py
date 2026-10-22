@@ -17,9 +17,7 @@ def test_preprocess_default_enables_compression():
 
 def test_preprocess_no_compress_disables_compression():
     with patch("environmental_stac_generator.cli.preprocess_main") as mock_main:
-        result = runner.invoke(
-            app, ["preprocess", "dummy.nc", "--no-compress"]
-        )
+        result = runner.invoke(app, ["preprocess", "dummy.nc", "--no-compress"])
 
     assert result.exit_code == 0
     assert mock_main.call_args.kwargs["compress"] is False

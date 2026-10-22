@@ -1,7 +1,14 @@
-from pathlib import Path
+from datetime import UTC, datetime
 
-from pystac import Asset, Catalog, Collection, Item, Extent, SpatialExtent, TemporalExtent
-from datetime import datetime, timezone
+from pystac import (
+    Asset,
+    Catalog,
+    Collection,
+    Extent,
+    Item,
+    SpatialExtent,
+    TemporalExtent,
+)
 
 from environmental_stac_generator.stac.utils import (
     apply_file_server_url,
@@ -44,16 +51,14 @@ def test_rewrite_catalog_asset_hrefs():
         description="c",
         extent=Extent(
             spatial=SpatialExtent([[-180, -90, 180, 90]]),
-            temporal=TemporalExtent(
-                [[datetime(2026, 1, 1, tzinfo=timezone.utc), None]]
-            ),
+            temporal=TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), None]]),
         ),
     )
     item = Item(
         id="item",
         geometry=None,
         bbox=[-180, -90, 180, 90],
-        datetime=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        datetime=datetime(2026, 1, 1, tzinfo=UTC),
         properties={},
     )
     collection.add_asset(

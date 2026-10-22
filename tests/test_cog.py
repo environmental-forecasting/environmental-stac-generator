@@ -63,10 +63,9 @@ def test_write_cog_uses_provided_band_statistics(tmp_path: Path) -> None:
 def test_write_cog_external_overviews_calls_gdaladdo(tmp_path: Path) -> None:
     cog_path = tmp_path / "demo.tif"
 
-    def _fake_gdaladdo(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    def _fake_gdaladdo(cmd, *args, **kwargs):
         path_arg = next(arg for arg in cmd if arg.endswith(".tif"))
         Path(path_arg).with_suffix(".tif.ovr").write_bytes(b"ovr")
-        return None
 
     with patch(
         "environmental_stac_generator.cog.subprocess.run",

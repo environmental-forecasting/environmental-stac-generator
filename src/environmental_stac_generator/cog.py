@@ -1,8 +1,9 @@
 import logging
 import subprocess
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -176,7 +177,9 @@ def write_cog(
                 forward_band_tags=True,
                 in_memory=True,
                 allow_intermediate_compression=allow_intermediate_compression,
-                temporary_compression=compress_norm if allow_intermediate_compression else "DEFLATE",
+                temporary_compression=compress_norm
+                if allow_intermediate_compression
+                else "DEFLATE",
                 quiet=True,
             )
 

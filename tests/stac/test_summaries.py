@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pystac import (
     Asset,
@@ -36,8 +36,8 @@ def _make_collection() -> Collection:
             TemporalExtent(
                 [
                     [
-                        datetime(2026, 1, 1, tzinfo=timezone.utc),
-                        datetime(2026, 1, 3, tzinfo=timezone.utc),
+                        datetime(2026, 1, 1, tzinfo=UTC),
+                        datetime(2026, 1, 3, tzinfo=UTC),
                     ]
                 ]
             ),
@@ -57,7 +57,7 @@ def _add_forecast_item(
         id=item_id,
         geometry=_GEOMETRY,
         bbox=_BBOX,
-        datetime=datetime(2026, 1, day, tzinfo=timezone.utc),
+        datetime=datetime(2026, 1, day, tzinfo=UTC),
         properties={
             "forecast:reference_time": reference_time,
             "forecast:leadtime_length": leadtime_length,

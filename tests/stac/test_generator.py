@@ -1,5 +1,4 @@
-from datetime import datetime
-from concurrent.futures import ProcessPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,9 +8,10 @@ import pandas as pd
 import pytest
 import rioxarray  # noqa: F401
 import xarray as xr
+from shapely.geometry import box, mapping
+
 from environmental_stac_generator.stac.generator import STACGenerator
 from environmental_stac_generator.stac.utils import ConfigMismatchError
-from shapely.geometry import box, mapping
 
 
 @pytest.fixture
@@ -40,9 +40,9 @@ def sample_sic_ds():
         },
         coords={
             "time": pd.date_range("2025-01-01", periods=1),
-            "leadtime": np.random.rand((93)),
-            "xc": np.random.rand((432)),
-            "yc": np.random.rand((432)),
+            "leadtime": np.random.rand(93),
+            "xc": np.random.rand(432),
+            "yc": np.random.rand(432),
         },
         attrs={"geospatial_bounds_crs": "EPSG:6931"},
     )
@@ -67,7 +67,6 @@ def test_set_out_paths(stac, tmp_path):
     assert stac._netcdf_output_dir == tmp_path / "netcdf" / "test_collection"
     assert stac._cogs_output_dir == tmp_path / "cogs" / "test_collection"
     assert stac._config_output_path == tmp_path / "config.json"
-
 
 
 def test_store_config_new_file(stac, tmp_path):
@@ -248,9 +247,7 @@ def test_get_bbox_and_geometry_with_projection(stac):
         "environmental_stac_generator.stac.generator.proj_to_geo",
         return_value=expected_bbox,
     ):
-        returned_bbox, geometry = stac._get_bbox_and_geometry(
-            ds, x_coord, y_coord, crs
-        )
+        returned_bbox, geometry = stac._get_bbox_and_geometry(ds, x_coord, y_coord, crs)
 
     np.testing.assert_allclose(returned_bbox, expected_bbox, atol=1e-5)
     assert geometry == mapping(box(*expected_bbox))
@@ -284,15 +281,15 @@ def test_get_forecast_info(stac, sample_sic_ds):
 
     (
         crs,
-        bbox,
-        geometry,
+        _bbox,
+        _geometry,
         valid_bands,
-        x_coord,
-        y_coord,
-        time_coords,
-        time_coords_start,
-        time_coords_end,
-        leadtime_coords,
+        _x_coord,
+        _y_coord,
+        _time_coords,
+        _time_coords_start,
+        _time_coords_end,
+        _leadtime_coords,
     ) = result
 
     assert crs == "EPSG:6931", "`crs` should be 'EPSG:6931'"
@@ -309,8 +306,14 @@ def test_process_leadtime_stac_only_without_cog(tmp_path):
     yc = np.linspace(-1000, 1000, ny)
     ds = xr.Dataset(
         {
-            "sic_mean": (("time", "leadtime", "yc", "xc"), np.random.rand(1, 1, ny, nx)),
-            "sic_stddev": (("time", "leadtime", "yc", "xc"), np.random.rand(1, 1, ny, nx)),
+            "sic_mean": (
+                ("time", "leadtime", "yc", "xc"),
+                np.random.rand(1, 1, ny, nx),
+            ),
+            "sic_stddev": (
+                ("time", "leadtime", "yc", "xc"),
+                np.random.rand(1, 1, ny, nx),
+            ),
         },
         coords={"xc": xc, "yc": yc},
     )
@@ -324,8 +327,8 @@ def test_process_leadtime_stac_only_without_cog(tmp_path):
         time_idx=0,
         time_dim="time",
         lead_dim="leadtime",
-        valid_time=datetime(2025, 1, 2),
-        forecast_reference_time=datetime(2025, 1, 1),
+        valid_time=datetime(2025, 1, 2, tzinfo=UTC),
+        forecast_reference_time=datetime(2025, 1, 1, tzinfo=UTC),
         x_coord="xc",
         y_coord="yc",
         crs="EPSG:6931",

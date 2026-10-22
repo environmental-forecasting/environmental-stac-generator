@@ -13,7 +13,7 @@ import xarray as xr
 from deepdiff import DeepDiff
 from pystac import Asset, Catalog, Collection, Item
 from pystac.extensions.projection import ProjectionExtension
-from pystac.utils import datetime_to_str, str_to_datetime
+from pystac.utils import datetime_to_str
 from shapely.geometry import box, mapping
 from tqdm import tqdm
 
@@ -27,8 +27,8 @@ from ..utils import (
     get_da_statistics,
     get_hemisphere,
     get_nc_attributes,
-    resolve_valid_times,
     proj_to_geo,
+    resolve_valid_times,
 )
 from .utils import (
     ConfigMismatchError,
@@ -36,13 +36,15 @@ from .utils import (
     refresh_collection_summaries,
     to_cwd_relative_href,
 )
+
 logger = logging.getLogger(__name__)
 
 # Datetime format constants used for STAC asset generation
-DT_FMT_FILENAME = "%Y-%m-%d_%H%M"       # Filesystem-safe format for COG filenames and item IDs
-DT_FMT_DISPLAY = "%Y-%m-%d %H:%M"       # Human-readable format for asset titles
-DT_FMT_ISO8601 = "%Y-%m-%dT%H:%M:%SZ"   # ISO 8601 format for STAC properties
-
+DT_FMT_FILENAME = (
+    "%Y-%m-%d_%H%M"  # Filesystem-safe format for COG filenames and item IDs
+)
+DT_FMT_DISPLAY = "%Y-%m-%d %H:%M"  # Human-readable format for asset titles
+DT_FMT_ISO8601 = "%Y-%m-%dT%H:%M:%SZ"  # ISO 8601 format for STAC properties
 
 
 class BaseSTAC:
@@ -244,13 +246,13 @@ class BaseSTAC:
             # Add projection extension
             ProjectionExtension.add_to(item)
             proj = ProjectionExtension.ext(item)
-            proj.code = crs # type: ignore
+            proj.code = crs  # type: ignore
             collection.add_item(item)
 
             self._modified_collections.add(collection)
 
         self._modified_items.add(item)
-        return item # type: ignore
+        return item  # type: ignore
 
     def create_multiband_raster(
         self,
@@ -363,7 +365,6 @@ class BaseSTAC:
             nc_file: Path to the netCDF file to process.
             **kwargs: Additional keyword arguments for custom processing logic.
         """
-        pass
 
 
 class STACGenerator(BaseSTAC):
@@ -455,9 +456,7 @@ class STACGenerator(BaseSTAC):
             # New collection in an existing config file: merge and write
             current_config_data.update(config_data)
             with open(config_output_path, "wb") as f:
-                f.write(
-                    orjson.dumps(current_config_data, option=orjson.OPT_INDENT_2)
-                )
+                f.write(orjson.dumps(current_config_data, option=orjson.OPT_INDENT_2))
         else:
             config_output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_output_path, "wb") as f:
@@ -491,9 +490,7 @@ class STACGenerator(BaseSTAC):
             info, _ = self._forecast_info_from_dataset(ds)
             return info
 
-    def _forecast_info_from_dataset(
-        self, ds: xr.Dataset
-    ) -> tuple[tuple, xr.Dataset]:
+    def _forecast_info_from_dataset(self, ds: xr.Dataset) -> tuple[tuple, xr.Dataset]:
         """
         Extract forecast metadata from an already-open dataset.
 
@@ -566,7 +563,10 @@ class STACGenerator(BaseSTAC):
             Modified dataset with coordinates in meters.
         """
         # Convert eastings and northings from kilometers to metres (if need to).
-        if ds.coords[y_coord].attrs.get("units", None) in ["1000 meter", "km"]: # `1000 meter` is legacy support for `icenet < v0.4.0``
+        if ds.coords[y_coord].attrs.get("units", None) in [
+            "1000 meter",
+            "km",
+        ]:  # `1000 meter` is legacy support for `icenet < v0.4.0``
             ds = ds.assign_coords({y_coord: ds.coords[y_coord] * 1000})
             ds.coords[y_coord].attrs["units"] = "meters"
         if ds.coords[x_coord].attrs.get("units", None) in ["1000 meter", "km"]:
@@ -603,7 +603,7 @@ class STACGenerator(BaseSTAC):
         # If projected CRS, convert to WGS84
         if crs not in ["EPSG:4326", "4326"]:
             bbox = proj_to_geo(bbox_projected=bbox, src_crs=crs)
-        geometry = mapping(box(*bbox)) # type: ignore
+        geometry = mapping(box(*bbox))  # type: ignore
         return bbox, geometry
 
     def process(
@@ -668,9 +668,7 @@ class STACGenerator(BaseSTAC):
                 ds,
             ) = self._forecast_info_from_dataset(ds)
             if leadtime_coords is None:
-                raise ValueError(
-                    "Dataset is missing leadtime / lead_time coordinates"
-                )
+                raise ValueError("Dataset is missing leadtime / lead_time coordinates")
             nleadtime = len(leadtime_coords)
             lead_dim = leadtime_coords.dims[0]
             time_dim = time_coords.dims[0]
@@ -723,12 +721,8 @@ class STACGenerator(BaseSTAC):
                 forecast_end_time_str = datetime_to_str(forecast_end_time)
 
                 # Create output dirs
-                ncdf_dir = Path(
-                    self._netcdf_output_dir / f"{forecast_reference_date}"
-                )
-                cog_dir = Path(
-                    self._cogs_output_dir / f"{forecast_reference_date}"
-                )
+                ncdf_dir = Path(self._netcdf_output_dir / f"{forecast_reference_date}")
+                cog_dir = Path(self._cogs_output_dir / f"{forecast_reference_date}")
                 item_id = f"forecast_init_{forecast_reference_time_filesafe}"
 
                 ncdf_dir.mkdir(parents=True, exist_ok=True)
@@ -745,24 +739,29 @@ class STACGenerator(BaseSTAC):
                         if all_files_exist:
                             for vt in valid_times:
                                 vt_dt = pd.Timestamp(vt).to_pydatetime()
-                                item_id_cog = f"{item_id}_lead_{vt_dt.strftime(DT_FMT_FILENAME)}"
+                                item_id_cog = (
+                                    f"{item_id}_lead_{vt_dt.strftime(DT_FMT_FILENAME)}"
+                                )
                                 if not (cog_dir / f"{item_id_cog}.tif").exists():
                                     all_files_exist = False
                                     break
                             if all_files_exist:
-                                first_vt_dt = pd.Timestamp(valid_times[0]).to_pydatetime()
+                                first_vt_dt = pd.Timestamp(
+                                    valid_times[0]
+                                ).to_pydatetime()
                                 first_item_id_cog = f"{item_id}_lead_{first_vt_dt.strftime(DT_FMT_FILENAME)}"
                                 if not (cog_dir / f"{first_item_id_cog}.jpg").exists():
                                     all_files_exist = False
 
                         if all_files_exist:
-                            logger.debug(f"Item {item_id} already exists with all files on disk; skipping.")
+                            logger.debug(
+                                f"Item {item_id} already exists with all files on disk; skipping."
+                            )
                             continue
 
                 # Write the netCDF file in addition to the STAC json output
                 if not stac_only and (not out_nc_file.exists() or overwrite):
                     self._write_netcdf(ds_time_slice, out_nc_file)
-
 
                 properties = {
                     "forecast:reference_time": forecast_reference_time_str,
@@ -780,7 +779,7 @@ class STACGenerator(BaseSTAC):
                     geometry=geometry,
                     bbox=bbox,
                     datetime=forecast_reference_time,  # Becomes "Time of Data" property, under Metadata -> General in STAC-Browser
-                                                       # Used for temporal filtering of items
+                    # Used for temporal filtering of items
                     crs=crs,
                     properties=properties,
                 )
@@ -808,7 +807,6 @@ class STACGenerator(BaseSTAC):
                 if not stac_only:
                     add_file_info_to_asset(nc_asset, str(out_nc_file.resolve()))
 
-
                 common_args = (
                     forecast_reference_time,
                     x_coord,
@@ -827,7 +825,9 @@ class STACGenerator(BaseSTAC):
                 # (which mutates as assets are added and caused "dictionary changed
                 # size during iteration").
                 executor = self._get_executor(workers)
-                with tqdm(total=nleadtime, desc="Lead times", position=1, leave=False) as pbar:
+                with tqdm(
+                    total=nleadtime, desc="Lead times", position=1, leave=False
+                ) as pbar:
                     futures = []
                     for i in range(nleadtime):
                         future = executor.submit(
@@ -844,15 +844,19 @@ class STACGenerator(BaseSTAC):
                         futures.append(future)
 
                     for future in futures:
-                        i, cog_file, assets, pbar_description = future.result()
+                        i, _, assets, pbar_description = future.result()
                         pbar.set_description(pbar_description)
                         for asset in assets:
                             item.add_asset(key=asset["key"], asset=asset["asset"])
-                            if asset["key"] == "thumbnail" and time_idx == 0 and i == 0:
-                                if not collection.get_assets(role="thumbnail"):
-                                    collection.add_asset(
-                                        key=asset["key"], asset=asset["asset"].clone()
-                                    )
+                            if (
+                                asset["key"] == "thumbnail"
+                                and time_idx == 0
+                                and i == 0
+                                and not collection.get_assets(role="thumbnail")
+                            ):
+                                collection.add_asset(
+                                    key=asset["key"], asset=asset["asset"].clone()
+                                )
         finally:
             ds.close()
 
@@ -910,7 +914,9 @@ class STACGenerator(BaseSTAC):
         with xr.open_dataset(nc_file, cache=False) as ds:
             ds_leadtime_slice = ds.isel({time_dim: time_idx, lead_dim: i}).load()
 
-        ds_leadtime_slice = STACGenerator._convert_units(ds_leadtime_slice, x_coord, y_coord)
+        ds_leadtime_slice = STACGenerator._convert_units(
+            ds_leadtime_slice, x_coord, y_coord
+        )
 
         # Set spatial dimensions for rioxarray
         ds_leadtime_slice.rio.set_spatial_dims(
@@ -977,17 +983,16 @@ class STACGenerator(BaseSTAC):
                 )
 
             # Create thumbnail plot for only the first variable for the first leadtime
-            if i == 0:
-                if not thumbnail_file.exists() or overwrite:
-                    if da_multiband is None:
-                        da_multiband = xr.concat(da_list, dim="band")
-                        da_multiband = da_multiband.assign_coords(band=("band", band_names))
-                    STACGenerator._create_and_write_thumbnail(
-                        da_multiband,
-                        thumbnail_file,
-                        forecast_reference_time,
-                        valid_time,
-                    )
+            if i == 0 and (not thumbnail_file.exists() or overwrite):
+                if da_multiband is None:
+                    da_multiband = xr.concat(da_list, dim="band")
+                    da_multiband = da_multiband.assign_coords(band=("band", band_names))
+                STACGenerator._create_and_write_thumbnail(
+                    da_multiband,
+                    thumbnail_file,
+                    forecast_reference_time,
+                    valid_time,
+                )
         else:
             pbar_description = f"Processing STAC: {item_id_cog}"
 
@@ -1002,9 +1007,9 @@ class STACGenerator(BaseSTAC):
 
         assets = []
         # Add COG asset to item
-        cog_asset = dict(
-            key=valid_time_str,
-            asset=Asset(
+        cog_asset = {
+            "key": valid_time_str,
+            "asset": Asset(
                 href=to_cwd_relative_href(str(cog_file.resolve())),
                 media_type=pystac.MediaType.COG,
                 title=f"Forecast at {valid_time.strftime(DT_FMT_DISPLAY)}",
@@ -1019,28 +1024,30 @@ class STACGenerator(BaseSTAC):
                     "proj:epsg": epsg_code,  # Optional but good to include
                 },
             ),
-        )
+        }
         if not stac_only:
             add_file_info_to_asset(
                 cog_asset["asset"],
                 str(cog_file.resolve()),
                 data_type=da_dtype,
-                byte_order="little-endian"
+                byte_order="little-endian",
             )
         assets.append(cog_asset)
 
         if i == 0 and not stac_only:
             # Some STAC tools may only show the first thumbnail asset
-            thumbnail_asset = dict(
-                key="thumbnail",
-                asset=Asset(
+            thumbnail_asset = {
+                "key": "thumbnail",
+                "asset": Asset(
                     href=to_cwd_relative_href(str(thumbnail_file.resolve())),
                     media_type=pystac.MediaType.JPEG,
                     title="Thumbnail",
                     roles=["thumbnail"],
                 ),
+            }
+            add_file_info_to_asset(
+                thumbnail_asset["asset"], str(thumbnail_file.resolve())
             )
-            add_file_info_to_asset(thumbnail_asset["asset"], str(thumbnail_file.resolve()))
             assets.append(thumbnail_asset)
 
         return i, cog_file, assets, pbar_description
@@ -1058,7 +1065,8 @@ class STACGenerator(BaseSTAC):
                 "zlib": True,
                 "complevel": 4,
                 "shuffle": True,
-            } for var in ds_time_slice.data_vars
+            }
+            for var in ds_time_slice.data_vars
         }
         ds_time_slice.to_netcdf(
             out_nc_file,
@@ -1128,7 +1136,9 @@ class STACGenerator(BaseSTAC):
         # plt.title(f"Init: {forecast_reference_time}\nLeadtime: {valid_time}")
         plt.title("")
         plt.axis("off")
-        plt.savefig(thumbnail_file, pad_inches=0, bbox_inches="tight", transparent=False)
+        plt.savefig(
+            thumbnail_file, pad_inches=0, bbox_inches="tight", transparent=False
+        )
         plt.close(fig)
 
     def save_catalog(self):

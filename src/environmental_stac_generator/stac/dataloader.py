@@ -157,7 +157,7 @@ class PGSTACDataLoader:
         # Prepare items to load (skip if exists and overwrite==False)
         items_to_load = []
         for item in self.catalog.get_items(recursive=True):
-            if not overwrite and self.item_exists(item.collection_id, item.id): # type: ignore
+            if not overwrite and self.item_exists(item.collection_id, item.id):  # type: ignore
                 logger.info(
                     f"Skipping existing item {item.id} in collection {item.collection_id}"
                 )
@@ -180,7 +180,7 @@ class PGSTACDataLoader:
             True if ingestion was successful, False otherwise.
         """
         insert_mode = Methods.upsert if overwrite else Methods.insert
-        
+
         # Load collections via your existing loader
         if collections_to_load:
             self.loader.load_collections(
@@ -192,9 +192,7 @@ class PGSTACDataLoader:
 
         # Load items via your existing loader
         if items_to_load:
-            self.loader.load_items(
-                file=iter(items_to_load), insert_mode=insert_mode
-            )
+            self.loader.load_items(file=iter(items_to_load), insert_mode=insert_mode)
             logger.info(f"Loaded {len(items_to_load)} items")
         else:
             logger.info("No items to load")
@@ -215,13 +213,13 @@ class PGSTACDataLoader:
             True if the API becomes accessible, False otherwise.
         """
         for i in range(max_retries):
-            logging.info(f"{i}")
+            logger.info(f"{i}")
             try:
                 response = requests.get(f"{self.stac_api_url}")
                 if response.status_code == 200:
                     logger.info("STAC API is accessible")
                     return True
-            except requests.exceptions.RequestException as e:
+            except requests.exceptions.RequestException:
                 logger.info(f"Waiting for STAC API... (attempt {i + 1}/{max_retries})")
                 time.sleep(delay)
 
